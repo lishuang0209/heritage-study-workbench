@@ -1,0 +1,26 @@
+# Local secrets, credentials and machine settings
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.DS_Store
+.vscode/
+.idea/
+# Local datasets and generated deliveries
+验证/
+素材/*
+!素材/照片来源.md
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+# Dependencies and generated caches
+**/.venv
+**/node_modules
+**/.next/
+**/__pycache__/
+**/.pytest_cache/
+*.pyc
+*.tsbuildinfo

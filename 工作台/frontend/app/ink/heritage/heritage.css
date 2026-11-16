@@ -1,0 +1,72 @@
+/* Reuse the ink workbench's palette and spacing; keep rules out of its embedded wizard. */
+.ink-page .study-workspace { display:grid; gap:24px; margin-top:24px; padding-bottom:48px; }
+.ink-page .ink-wizard-steps.study-tabs { grid-template-columns:repeat(5,minmax(0,1fr)); }
+.ink-page .study-stage-heading { margin:0; }
+.ink-page .study-card,
+.ink-page .study-photo { min-width:0; border:1px solid var(--lp-border-subtle); background:var(--lp-surface); border-radius:16px; padding:28px; }
+.ink-page .study-card h2 { color:var(--lp-text-strong); font-size:16px; line-height:1.5; font-weight:600; margin:0 0 12px; }
+.ink-page .study-card h3,
+.ink-page .study-photo h3 { color:var(--lp-text-strong); font-size:14px; line-height:1.5; font-weight:600; margin:0 0 14px; }
+.ink-page .study-card p:where(:not(.study-error):not(.study-hint)) { font-size:13px; color:var(--lp-text-muted); line-height:1.7; margin-bottom:16px; }
+.ink-page :where(.study-card,.study-photo) label { display:block; min-width:0; font-size:12px; color:var(--lp-text-muted); margin:12px 0; line-height:1.6; }
+.ink-page :where(.study-card,.study-photo) input:not([type=checkbox]):not([type=range]),
+.ink-page :where(.study-card,.study-photo) textarea,
+.ink-page :where(.study-card,.study-photo) select { width:100%; display:block; min-height:40px; border:1px solid var(--lp-border-subtle); background:var(--lp-surface); border-radius:8px; padding:10px; margin-top:7px; font-size:13px; line-height:1.6; color:var(--lp-text-default); }
+.ink-page :where(.study-card,.study-photo) textarea { resize:vertical; }
+.ink-page :where(.study-card,.study-photo) input::placeholder,
+.ink-page :where(.study-card,.study-photo) textarea::placeholder { color:var(--lp-text-subtle); }
+.ink-page :where(.study-card,.study-photo) input:focus-visible,
+.ink-page :where(.study-card,.study-photo) textarea:focus-visible { outline:2px solid var(--lp-text-strong); outline-offset:2px; }
+.ink-page :where(.study-card,.study-photo) input:disabled,
+.ink-page :where(.study-card,.study-photo) textarea:disabled,
+.ink-page :where(.study-card,.study-photo) select:disabled { opacity:.55; cursor:not-allowed; }
+.ink-page .study-two { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 24px; }
+.ink-page .study-full { grid-column:1/-1; }
+.ink-page .study-actions { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:16px 0 0; }
+.ink-page .study-actions > span { color:var(--lp-text-muted); font-size:12px; line-height:1.6; }
+.ink-page :where(.study-card,.study-photo) button:not(.ink-primary-button),
+.ink-page .study-actions > button:not(.ink-primary-button) { display:inline-flex; align-items:center; justify-content:center; min-height:36px; gap:6px; border:1px solid var(--lp-border-subtle); padding:8px 12px; border-radius:8px; background:var(--lp-surface); color:var(--lp-text-default); font-size:12px; line-height:1.5; cursor:pointer; transition:background .15s,border-color .15s; }
+.ink-page :where(.study-card,.study-photo) button:not(.ink-primary-button):hover:not(:disabled),
+.ink-page .study-actions > button:not(.ink-primary-button):hover:not(:disabled) { border-color:var(--lp-border-strong); background:var(--lp-surface-subtle); }
+.ink-page :where(.study-card,.study-photo) button:not(.ink-primary-button):disabled,
+.ink-page .study-actions > button:not(.ink-primary-button):disabled { opacity:.4; cursor:not-allowed; }
+.ink-page :where(.study-card,.study-photo) .study-check { display:flex; gap:8px; align-items:flex-start; color:var(--lp-text-default); line-height:1.7; }
+.ink-page .study-check input { margin-top:3px; width:15px; height:15px; flex-shrink:0; accent-color:var(--lp-action-primary); }
+.ink-page .study-error,
+.ink-page .study-notice { margin:0; line-height:1.7; }
+.ink-page :where(.study-card,.study-photo) .study-hint { color:var(--lp-text-muted); font-size:11px; line-height:1.7; }
+.ink-page .study-photo-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; align-items:start; }
+.ink-page .study-mark-canvas { position:relative; width:100%; overflow:hidden; border:1px solid var(--lp-border-subtle); border-radius:12px; background:var(--lp-surface-soft); }
+.ink-page .study-mark-canvas img { width:100%; height:100%; object-fit:contain; display:block; }
+.ink-page .study-mark-canvas svg { position:absolute; inset:0; width:100%; height:100%; touch-action:none; cursor:crosshair; }
+.ink-page .study-photo-options,
+.ink-page .study-coordinates { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+.ink-page .study-photo fieldset { margin-top:18px; padding-top:14px; border-top:1px solid var(--lp-border-divider); }
+.ink-page .study-photo legend { font-size:12px; color:var(--lp-text-muted); }
+.ink-page .study-coordinates label { flex:1; min-width:80px; }
+.ink-page .study-photo input[type=range] { display:block; width:100%; margin-top:10px; accent-color:var(--lp-action-primary); }
+.ink-page .study-photo details { margin-top:18px; padding-top:14px; border-top:1px solid var(--lp-border-divider); font-size:12px; color:var(--lp-text-muted); line-height:1.7; }
+.ink-page .study-photo summary { cursor:pointer; }
+.ink-page .study-portrait-preview { width:100%; max-width:320px; height:auto; margin:16px auto; display:block; border-radius:10px; background:var(--lp-surface-soft); }
+.ink-page .study-output { padding:20px; border:1px solid var(--lp-border-subtle); border-radius:12px; margin:20px 0 0; }
+.ink-page .study-output video { width:100%; max-height:540px; background:var(--lp-text-strong); border-radius:10px; }
+.ink-page .study-output p { margin:12px 0; }
+.ink-page .study-output a { display:inline-flex; margin-right:20px; font-size:12px; color:var(--lp-text-muted); text-decoration:underline; text-underline-offset:4px; }
+.ink-page .study-card ol { margin-top:18px; padding:16px 18px; border-radius:10px; background:var(--lp-surface-soft); font-size:12px; color:var(--lp-text-muted); line-height:1.9; }
+.ink-page .study-entry { margin:0 0 36px; }
+.ink-page .study-entry > p { margin:-6px 0 18px; color:var(--lp-text-muted); font-size:13px; line-height:1.7; }
+.ink-page .study-entry .ink-section-heading { align-items:center; }
+.ink-page .study-entry .ink-section-heading .ink-secondary-button { min-height:34px; padding:7px 12px; font-size:12px; }
+.ink-page .study-case-grid .ink-example-media { aspect-ratio:2.8; }
+@media(max-width:800px) {
+  .ink-page .study-photo-grid,.ink-page .study-two { grid-template-columns:minmax(0,1fr); }
+  .ink-page .study-card,.ink-page .study-photo { padding:20px; }
+}
+@media(max-width:680px) {
+  .ink-page .study-workspace { gap:20px; }
+  .ink-page .study-card,.ink-page .study-photo { padding:18px; }
+  .ink-page .study-entry .ink-section-heading { align-items:flex-start; }
+  .ink-page .study-case-grid .ink-example-media { aspect-ratio:auto; }
+  .ink-page .study-actions > .ink-primary-button { width:100%; }
+  .ink-page .study-output { padding:16px; }
+}

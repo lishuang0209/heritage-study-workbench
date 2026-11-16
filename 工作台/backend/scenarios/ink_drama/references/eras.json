@@ -1,0 +1,180 @@
+{
+  "version": 1,
+  "checked_at": "2026-11-11",
+  "entries": [
+    {
+      "id": "tang-figure",
+      "eras": [
+        "唐代"
+      ],
+      "title": "三彩釉陶女俑",
+      "institution": "中国国家博物馆",
+      "url": "https://www.chnmuseum.cn/zp/zpml/kgfjp/202111/t20211116_252272.shtml",
+      "category": "服饰与发式",
+      "facts": "这件唐代女俑呈现交领小袖上衣、半臂、长裙、披帛与乌蛮髻。",
+      "limits": "仅为特定女俑样本；唐代不同时期发式、衣装和体态有变化，不可套用于所有女子或劳动场景。"
+    },
+    {
+      "id": "southern-song-gauze",
+      "eras": [
+        "宋代",
+        "南宋"
+      ],
+      "title": "素罗单衣",
+      "institution": "中国丝绸博物馆",
+      "url": "https://www.chinasilkmuseum.com/yg/info_13.aspx?itemid=28354",
+      "category": "服饰",
+      "facts": "南宋1274年周氏墓出土单衣，直领对襟、窄袖、侧开衩，罗织物，前襟有布扣。",
+      "limits": "官宦家庭墓葬服饰，不代表所有平民；不可把丝罗直接称作麻布，也不能笼统声称宋代无衣扣。"
+    },
+    {
+      "id": "northern-song-figures",
+      "eras": [
+        "宋代",
+        "北宋"
+      ],
+      "title": "宋代彩绘袖手、抱印石女俑",
+      "institution": "河南博物院",
+      "url": "https://www.chnmus.net/sitesources/hnsbwy/page_pc/dzjp/mzyp/sdchxsbysny/list1.html",
+      "category": "服饰与发式",
+      "facts": "北宋范氏墓女俑中可见高髻、双鬟髻、红带、宽袖长袍与百褶长裙。",
+      "limits": "官宦墓葬侍从形象；双鬟髻不可直接等同现代双丸子头，不据此判断所有女子的年龄婚姻。"
+    },
+    {
+      "id": "northern-song-hall",
+      "eras": [
+        "宋代",
+        "北宋"
+      ],
+      "title": "保国寺北宋大殿价值解读",
+      "institution": "宁波中国港口博物馆",
+      "url": "https://www.portmuseum.cn/doc/jy/gbjt/read/38762.shtml",
+      "category": "建筑",
+      "facts": "保国寺大殿于1013年重建，宋时为单檐歇山顶、三开间厅堂式构架。",
+      "limits": "这是浙东佛殿案例，不是山门模板；现存外观受清代重修影响，不可整体照搬为宋代原貌。"
+    },
+    {
+      "id": "han-dress",
+      "eras": [
+        "汉代"
+      ],
+      "title": "汉魏印象：汉晋南北朝服饰艺术展",
+      "institution": "中国丝绸博物馆",
+      "url": "https://www.chinasilkmuseum.com/zz/info_17.aspx?itemid=30762",
+      "category": "服饰",
+      "facts": "汉代代表性深衣上衣下裳相连，可分曲裾、直裾，并有织物镶边。",
+      "limits": "展览跨多个时代，仅取明确属于汉代的描述；不把深衣作为所有身份、所有场合唯一服装。"
+    },
+    {
+      "id": "han-building",
+      "eras": [
+        "汉代"
+      ],
+      "title": "汉代建筑明器研究",
+      "institution": "中国国家博物馆",
+      "url": "https://www.chnmuseum.cn/yj/xscg/xslw/201812/t20181224_36398.shtml",
+      "category": "建筑与器物",
+      "facts": "汉代建筑明器可作为建筑和生活设施研究的材料，其中包含陶灶。",
+      "limits": "明器是随葬模型，比例和细节不能直接等同生活实物；未核实的屋顶结构不作确定描述。"
+    },
+    {
+      "id": "ming-dress",
+      "eras": [
+        "明代"
+      ],
+      "title": "明初钱氏女子服饰组合",
+      "institution": "中国丝绸博物馆",
+      "url": "https://www.chinasilkmuseum.com/zggd/info_21.aspx?itemid=1870",
+      "category": "服饰",
+      "facts": "钱氏女子三件套为明初江南服饰案例，下裙为绢制百褶裙，前后有较宽褶。",
+      "limits": "限定明初江南样本，不推定全明代各地区一致；不能直接把清代裙式细节倒套到本例。"
+    },
+    {
+      "id": "qing-dress",
+      "eras": [
+        "清代"
+      ],
+      "title": "清代宫廷服饰制度及其文化内涵",
+      "institution": "故宫博物院",
+      "url": "https://www.dpm.org.cn/learing_detail/262015.html",
+      "category": "服饰",
+      "facts": "清宫服饰依身份场合分礼服、吉服、常服、便服等，帝后便服类型包括袍、褂、衫等。",
+      "limits": "仅为宫廷制度；不得为普通百姓添加龙纹、朝珠、宫廷冠饰，也不能把常服和便服混作同一制度类别。"
+    },
+    {
+      "id": "qing-hair",
+      "eras": [
+        "清代"
+      ],
+      "title": "清代宫廷服饰探讨",
+      "institution": "故宫博物院",
+      "url": "https://www.dpm.org.cn/learing_detail/258734.html",
+      "category": "发式",
+      "facts": "清宫女性发式有从真发两把头到晚清大拉翅的变化。",
+      "limits": "限定宫廷女性与时期，不把晚清大拉翅用于清初或所有汉族女性。"
+    },
+    {
+      "id": "tang-vessel",
+      "eras": [
+        "唐代"
+      ],
+      "title": "执壶",
+      "institution": "故宫博物院",
+      "url": "https://www.dpm.org.cn/lemmas/242436.html",
+      "category": "器物",
+      "facts": "唐代执壶的典型特征包括硕腹、喇叭口和短嘴。",
+      "limits": "器类概述不等于每件器物；仅在剧情需要壶时使用，不擅自增加道具。"
+    },
+    {
+      "id": "song-vessel",
+      "eras": [
+        "宋代",
+        "北宋",
+        "南宋"
+      ],
+      "title": "青白釉带温碗瓷酒注",
+      "institution": "中国国家博物馆",
+      "url": "https://www.chnmuseum.cn/zp/zpml/kgfjp/202111/t20211116_252333.shtml",
+      "category": "器物",
+      "facts": "宋墓出土青白釉注子与温碗，二者配套使用。",
+      "limits": "只支持宋代器类参考，不将所有出土例指定为北宋或南宋；不是油纸伞构造的证据。"
+    },
+    {
+      "id": "ming-qing-furniture",
+      "eras": [
+        "明代",
+        "清代"
+      ],
+      "title": "家具艺术讲座",
+      "institution": "故宫博物院",
+      "url": "https://www.dpm.org.cn/gugongforum/detail/180324.html",
+      "category": "家具与器物",
+      "facts": "明代除木家具也有漆器家具；清代康熙前期保留明式特点，雍正乾隆时期清式风格发展。",
+      "limits": "宫廷和精制家具不能套给贫寒民居；明式是风格名，不可直接当作制造年代。"
+    },
+    {
+      "id": "qing-hall",
+      "eras": [
+        "清代"
+      ],
+      "title": "太和殿",
+      "institution": "故宫博物院",
+      "url": "https://www.dpm.org.cn/explore/building/236465.html",
+      "category": "建筑",
+      "facts": "现见太和殿形制为清康熙三十四年重建后的形制，属于高等级宫殿。",
+      "limits": "仅用于对应宫殿场景；不得套用于民宅、寺院或声称是明初原貌。"
+    },
+    {
+      "id": "ming-hall",
+      "eras": [
+        "明代"
+      ],
+      "title": "明清官式建筑柱头科研究",
+      "institution": "故宫博物院院刊",
+      "url": "https://img.dpm.org.cn/Uploads/File/2019/08/15/u5d5534dec54d0.pdf",
+      "category": "建筑",
+      "facts": "研究表列故宫中和殿为明天启七年（1627）宫殿遗构案例。",
+      "limits": "限建筑研究案例；现有装修与外观可能经过后世改动，不直接作为整个明代建筑模板。"
+    }
+  ]
+}
