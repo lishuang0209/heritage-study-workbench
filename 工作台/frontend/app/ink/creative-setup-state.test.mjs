@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setupSteps, setupSignature, confirmedSetupReviews, isSetupReviewed, nextSetupStep } from './creative-setup-state.ts';
+import { setupSteps, setupSignature, confirmedSetupReviews, isSetupReviewed, nextSetupStep, setupGenerationJob } from './creative-setup-state.ts';
 
 function settings() {
   return {
@@ -105,4 +105,36 @@ test('signature is stable across object key order and omitted versus null images
   const steps = [a];
   assert.deepEqual(nextSetupStep(steps, 'missing', () => false), { step: a, returning: false });
   assert.equal(nextSetupStep([], 'missing', () => false), null);
+});
+
+test('a click shows submitting feedback immediately instead of an older failure', () => {
+  const older={id:'old',action:'asset-image',state:'failed',error:'旧错误'};
+  const generation={key:'scenes:scene1',name:'大殿',style:'兼工带写',job:{id:'local',action:'asset-image',state:'submitting',error:''}};
+  assert.equal(setupGenerationJob([older],generation,generation.key),generation.job);
+  assert.equal(setupGenerationJob([older],generation,generation.key).error,'');
+});
+
+test('the same feedback follows the persisted job through running, failure and success', () => {
+  const generation={key:'scenes:scene1',name:'大殿',style:'兼工带写',job:{id:'job1',action:'asset-image',state:'running',error:''}};
+  for(const state of ['running','failed','interrupted','completed']){
+    const server={...generation.job,state,error:state==='failed'?'上传参考图时安全连接中断（TLS/SSL）':''};
+    assert.equal(setupGenerationJob([server],generation,generation.key),server);
+  }
+  assert.equal(generation.job.state,'running');
+});
+
+test('submission errors stay beside the action and another asset does not inherit them', () => {
+  const generation={key:'scenes:scene1',name:'大殿',style:'兼工带写',job:{id:'local',action:'asset-image',state:'submit-failed',error:'请求失败（422）'}};
+  assert.equal(setupGenerationJob([],generation,generation.key).error,'请求失败（422）');
+  assert.equal(setupGenerationJob([],generation,'props:prop1'),undefined);
+});
+
+test('reopening a project still exposes its unfinished or failed setting job locally', () => {
+  for(const state of ['running','failed','interrupted']){
+    const job={id:'server',action:'asset-image',state,error:'具体错误'};
+    assert.equal(setupGenerationJob([job],null,'scenes:scene1'),job);
+  }
+  assert.equal(setupGenerationJob([{id:'done',action:'asset-image',state:'completed',error:''}],null,'scenes:scene1'),undefined);
+  assert.equal(setupGenerationJob([{id:'other',action:'split',state:'failed',error:''}],null,'scenes:scene1'),undefined);
+  assert.equal(setupGenerationJob([],null,'scenes:scene1'),undefined);
 });

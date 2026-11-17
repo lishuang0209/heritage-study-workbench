@@ -3,7 +3,8 @@ export type Photo = {credit_kind?:'manual'|'unresolved'|'catalog'|'self'|'author
 export type Station = {building:string;name:string;component:string;grade:string;standing_position:string;checked_description:string;objective:string;instruction:string;question:string;panorama:Photo|null;detail:Photo|null};
 export type Timing = {intro:number;location:number;task:number};
 export type StudyScript = {timing_version?:number;intro:string;location:string;task:string;version:number;station_version:number;confirmed_version:number|null};
-export type HeritageFields = {heritage_timing?:Timing;heritage_timing_version?:number;project_type?:'ink'|'heritage';heritage_station?:Station;heritage_version?:number;heritage_confirmed_version?:number|null;heritage_confirmed_snapshot?:Station;heritage_ready?:boolean;heritage_script?:StudyScript;task_card_url?:string|null;task_card_stale?:boolean;heritage_chapters?:{kind:string;duration:number;video:string}[];heritage_trial?:{participants:number;found_without_hint:number;preparation_minutes:number;notes:string}};
+export type SettingPhotoReference = {group:'scenes'|'props';asset_id:string;asset_name:string;source_image:string|null;mode:'crop'|'arrow'|'full';error:string;preview_url?:string};
+export type HeritageFields = {heritage_story_stale?:boolean;heritage_setting_references?:SettingPhotoReference[];heritage_timing?:Timing;heritage_timing_version?:number;project_type?:'ink'|'heritage';heritage_station?:Station;heritage_version?:number;heritage_confirmed_version?:number|null;heritage_confirmed_snapshot?:Station;heritage_ready?:boolean;heritage_script?:StudyScript;task_card_url?:string|null;task_card_stale?:boolean;heritage_chapters?:{kind:string;duration:number;video:string}[];heritage_trial?:{participants:number;found_without_hint:number;preparation_minutes:number;notes:string}};
 export const blankStation = ():Station => ({building:'',name:'',component:'',grade:'',standing_position:'',checked_description:'',objective:'',instruction:'',question:'',panorama:null,detail:null});
 // Read legacy two-field projects without mutating their saved revision.
 export function observationGuidance(station:Pick<Station,'standing_position'|'instruction'>):string {
@@ -85,4 +86,16 @@ export function timingError(timing:Timing):string {
 export function observationSplit(seconds:number,detail:boolean):{panorama:number;detail:number} {
   const panorama=detail?Math.ceil(seconds*6/11):seconds;
   return {panorama,detail:seconds-panorama};
+}
+
+export function mergeHistoryMaterial(material:string,history:string,sources:{title:string;url:string}[]=[]):string {
+  const facts=history.split(/[。！？]/).map(fact=>fact.trim()).filter(Boolean);
+  const missing=facts.filter(fact=>!material.includes(fact));
+  const links=sources.filter(source=>!material.includes(source.url));
+  return [material.trim(), ...missing.map(fact=>'历史背景：'+fact+'。'), ...links.map(source=>'资料来源：'+source.title+' '+source.url)].filter(Boolean).join('\n');
+}
+
+export function narrationEstimate(text:string):{characters:number;minimum:number;maximum:number} {
+  const characters=text.replace(/\s/g,'').length;
+  return {characters,minimum:Math.ceil(characters/4),maximum:Math.ceil(characters/3)};
 }

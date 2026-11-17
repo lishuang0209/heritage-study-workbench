@@ -51,3 +51,13 @@ test('stale images are shown as needing an update even when an older candidate e
   assert.equal(storyboardImageStatus({ image_url: null, image_proposal: {} }), '候选待确认');
   assert.equal(storyboardImageStatus({ image_url: null }), '待出图');
 });
+
+test('reopening an empty-cast shot retains narration while removing stale character dialogue', () => {
+  const p = project(); p.characters = [];
+  const original = shotFields(shot());
+  original.dialogues.unshift({character_id:'narrator',text:'大殿重建于北宋。'});
+  const reopened = reconcileShotFields(p, original);
+  assert.deepEqual(reopened.character_ids, []);
+  assert.deepEqual(reopened.dialogues, [{character_id:'narrator',text:'大殿重建于北宋。'}]);
+  assert.equal(original.dialogues.length, 2);
+});

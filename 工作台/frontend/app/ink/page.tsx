@@ -93,13 +93,13 @@ export default function InkPage() {
     if(example) created=await api<Project>(`/projects/${created.id}/heritage/station`,json('PUT',{version:0,station:example.station}));
     setProject(created);await refresh();
   };
-  return <main className={`ink-page h-full overflow-y-auto ${project ? 'ink-page-workspace' : 'ink-page-home'}`}>
+  return <main className={`ink-page h-full overflow-y-auto ${project ? 'ink-page-workspace' : 'ink-page-home'} ${project?.project_type==='heritage'?'ink-page-heritage':''}`}>
     <div className="ink-shell">
       <header className="ink-hero">
         <div>
           {project ? <button type="button" disabled={working || busy} onClick={() => { setProject(null); setError(''); }} className="ink-back"><ArrowLeft size={15} aria-hidden="true" />返回创作首页</button> : null}
           <h1>{project ? project.title : '古建研学水墨短片工作台'}</h1>
-          <p>{project ? project.project_type === 'heritage' ? '从讲解站资料到实拍定位，让学生自己找到实物。' : '跟着步骤，把故事做成一条水墨短片。' : '从一处古建构件出发，制作讲解短片与观察任务卡'}</p>
+          <p>{project ? project.project_type === 'heritage' ? '从讲解站资料到实拍定位，让学生自己找到实物。画面与短片采用 16:9 宽屏。' : '跟着步骤，把故事做成一条水墨短片。' : '从一处古建构件出发，制作讲解短片与观察任务卡'}</p>
         </div>
         {me && !me.trial_mode ? <button type="button" className="ink-secondary-button ink-api-entry" onClick={() => setApiSettingsOpen(true)}><Settings2 size={16} aria-hidden="true" />模型与 API</button> : null}
         {me?.trial_mode ? <div className="text-xs text-neutral-500 space-y-2"><p>{me.local ? '本机开发试用' : '受邀试用'} · {me.id}</p><button type="button" onClick={() => perform(async () => { await api('/logout', { method: 'POST' }); setMe(null); setProject(null); })} className="underline">退出</button></div> : null}

@@ -1,6 +1,10 @@
 import type { Project, Shot } from './ink-shared';
 export const wizardSteps = ['剧本', '创作设定', '分镜', '画面', '视频', '成片'];
 export const imageReady = (s: Shot) => Boolean(s.image_url && !s.image_stale);
+export function imageGenerationPlan(shot:Pick<Shot,'image_url'|'image_stale'>,number?:number):{label:string;mode:'direct'|'preview'} {
+  if(shot.image_url)return {label:shot.image_stale?'按新分镜重新生成':'重新生成图片',mode:'preview'};
+  return {label:number?`生成第 ${number} 镜图片`:'生成图片',mode:'direct'};
+}
 export const clipReady = (s: Shot) => imageReady(s) && Boolean(s.clip_url && !s.clip_stale);
 export const soundReady = (s: Shot) => clipReady(s) && Boolean(s.rendered_url && !s.rendered_stale);
 // A retained video remains viewable even when it needs explicit confirmation.

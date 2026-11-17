@@ -7,6 +7,7 @@ from typing import Literal
 
 from fastapi import Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import Field
 
@@ -17,6 +18,7 @@ from .templates import CASES, script_from_station, research_excerpt, HISTORY_PLA
 from .photo_credits import recognize, selected_credits, fill_existing
 from .detail_crop import crop_detail
 from .timing import Timing, timing_for
+from .material_import import extract_material, MAX_FILE_BYTES
 
 
 class SaveStation(Strict):
@@ -92,6 +94,19 @@ def install(api):
     @api.router.get('/heritage/templates')
     def templates(user=Depends(api.identity)):
         return {'templates':CASES}
+
+    @api.router.post('/projects/{pid}/heritage/material/preview')
+    async def preview_material(pid:str, version:int, file:UploadFile=File(...), user=Depends(api.identity)):
+        p=project(pid,user,True);check_version(p,version)
+        data=await file.read(MAX_FILE_BYTES+1)
+        try:
+            result=await run_in_threadpool(extract_material,data,file.filename)
+        except UserError as exc:
+            raise HTTPException(422,str(exc)) from exc
+        # Extraction only prepares a preview; never saves or invalidates a project.
+        with api.mutation_lock:
+            current=project(pid,user,True);check_version(current,version)
+        return result
 
     @api.router.put('/projects/{pid}/heritage/station')
     @api.serialized
@@ -201,6 +216,9 @@ def install(api):
 
     def update_script(p,script):
         previous=p.get('heritage_script') or {}
+        if p.get('shots') and p.get('script') != script['intro']:
+            p['heritage_story_stale']=True
+            p['storyboard_confirmed']=False
         p['heritage_script']={**script,'version':previous.get('version',0)+1,
                              'station_version':p.get('heritage_version',0),'timing_version':p.get('heritage_timing_version',0),'confirmed_version':None}
         p['script']=script['intro'];p['story_confirmed']=False
@@ -244,8 +262,9 @@ def install(api):
             timing=timing_for(p);duration=sum(timing.values());station_version=p.get('heritage_version',0);timing_version=p.get('heritage_timing_version',0);script_version=(p.get('heritage_script') or {}).get('version',0)
             prompt=(f'你为古建研学老师起草{duration}秒短片脚本。只使用老师提供的事实，不补充年代、结构数量、方位或历史结论。'
                     f'根据适用年级，用易懂的中文，按历史引入{timing["intro"]}秒、实物观察{timing["location"]}秒、现场任务{timing["task"]}秒安排。'
-                    '根据每段时间控制文字量；历史段时间充足时，讲清背景、历史价值和修缮线索，再引出构件。'
-                    'intro必须先讲一个资料中明确给出的地方历史重点，再引出本次构件，不能只有寻找问题。'
+                    '根据每段时间控制文字量，口播按每秒约3至4字估算。历史段是地方历史讲解，不是固定两句开场。'
+                    'intro按资料已有内容讲清寺名沿革、重建年代、建筑价值、修缮与保护，再自然引出构件；没有资料的主题跳过。'
+                    '历史段达到30秒且资料有多条事实时，应展开多个历史节点，不能只保留一句年代加一句寻找指令；时长较短时保留关键事实。'
                     '不虚构历史人物对话、传说或未提供的年代，不将后期修缮构件一概当作始建时原构。'
                     'location结合构件特点与观察指引，task给出一个可执行任务和观察问题。'
                     '资料来源链接、现场核对备注与待确认事项不写进学生台词；资料有缺口时明确留待老师补充。'
@@ -308,6 +327,7 @@ def install(api):
                     item['image']=copy_asset(item.get('image'));item['views']={}
         p.update(shots=shots,characters=copy.deepcopy(source['characters']),creative_settings=settings,
                  baseline=None,storyboard_confirmed=True,story_confirmed=True)
+        p.update(heritage_story_source=p['script'],heritage_story_stale=False)
         p['final_stale']=bool(p.get('final'));p['task_card_stale']=bool(p.get('task_card'))
         api.store.save(p);return api.public(p)
 
@@ -328,7 +348,8 @@ def install(api):
                 if narration:
                     from .media import add_voiceover
                     add_voiceover(api,p,script,target,user)
-                updates.update(final=target.name,final_stale=False)
+                from scenarios.ink_drama.media_format import format_for
+                updates.update(final=target.name,final_stale=False,final_media_format=format_for(p))
             if kind in ('card','both'):
                 target=folder/(stem+'-task-card.pdf');task_card(api.store,pid,station,target)
                 updates.update(task_card=target.name,task_card_stale=False)

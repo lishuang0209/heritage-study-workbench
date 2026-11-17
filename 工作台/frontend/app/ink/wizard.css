@@ -43,6 +43,9 @@
 .ink-page .ink-wizard-tags > span { font-size: 12px; padding: 5px 9px; border-radius: 6px; background: var(--lp-surface-soft); color: var(--lp-text-muted); }
 .ink-page .ink-wizard-secondary { display: flex; flex-wrap: wrap; gap: 12px; padding-top: 6px; }
 .ink-page .ink-wizard-secondary > button { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 8px 12px; border: 1px solid var(--lp-border-subtle); border-radius: 8px; }
+.ink-page .ink-image-actions > .ink-primary-button { background:#171717; color:#fff; border-color:#171717; font-weight:600; }
+.ink-page .ink-image-actions > .ink-primary-button:not(:disabled):hover { background:#333; }
+.ink-page .ink-image-actions > button:focus-visible { outline:2px solid var(--lp-text-strong); outline-offset:2px; }
 .ink-page .ink-wizard-scene-copy .ink-wizard-footnote, .ink-page .ink-wizard-footnote { color: var(--lp-text-muted); font-size: 11px; line-height: 1.7; }
 .ink-page .ink-wizard-review { font-size: 12px; padding: 12px; border-left: 3px solid var(--lp-text-strong); background: var(--lp-surface-soft); }
 .ink-page .ink-wizard-scene-copy details { font-size: 12px; color: var(--lp-text-muted); line-height: 1.8; }
@@ -92,6 +95,26 @@
 .ink-page .ink-history-grid img { width:100%; height:240px; object-fit:contain; background:#f7f7f7; }
 .ink-page .ink-history-grid small { color:#777; }
 .ink-page .ink-history-grid article>div { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.ink-page .ink-history-grid .ink-history-meta { justify-content:space-between; gap:8px; }
+.ink-page .ink-history-badge { --ink-history-status-color:#a3a3a3; display:inline-flex; align-items:center; gap:7px; color:#666; font-size:12px; line-height:1.5; font-weight:400; white-space:nowrap; }
+.ink-page .ink-history-status-dot { width:7px; height:7px; flex:0 0 7px; border-radius:50%; background:var(--ink-history-status-color); }
+.ink-page .ink-history-badge[data-state="using"] { --ink-history-status-color:#26945d; }
+.ink-page .ink-history-badge[data-state="pending"] { --ink-history-status-color:#cd941e; }
+.ink-page .ink-history-badge[data-state="reference"] { --ink-history-status-color:#5286b5; }
+.ink-page .ink-history-badge[data-state="discarded"] { --ink-history-status-color:#b58168; }
+.ink-page .ink-history-badge[data-state="deleted"] { --ink-history-status-color:#c64e4e; }
+.ink-page .ink-history-actions { margin-top:auto; padding-top:12px; border-top:1px solid #eee; }
+.ink-page .ink-history-actions > a,
+.ink-page .ink-history-actions > button { display:inline-flex; align-items:center; justify-content:center; gap:5px; border:1px solid #ddd; border-radius:7px; background:#fff; color:#333; padding:7px 10px; font-size:12px; line-height:1.5; text-decoration:none; }
+.ink-page .ink-history-actions > a:hover,
+.ink-page .ink-history-actions > button:hover:not(:disabled) { background:#f4f4f4; border-color:#aaa; }
+.ink-page .ink-history-actions > button:disabled { color:#999; opacity:.5; cursor:not-allowed; }
+.ink-page .ink-history-actions > a:focus-visible,
+.ink-page .ink-history-actions > button:focus-visible { outline:2px solid #222; outline-offset:2px; }
+.ink-page .ink-history-feedback { position:sticky; top:0; z-index:1; margin:0 0 16px; padding:12px; border-left:3px solid #222; background:#f4f4f4; color:#333; font-size:12px; }
+.ink-page .ink-history-removed { margin-top:24px; padding-top:18px; border-top:1px solid #ddd; }
+.ink-page .ink-history-removed > summary { cursor:pointer; font-size:13px; color:#666; }
+.ink-page .ink-history-removed > p { margin:12px 0; font-size:12px; color:#777; }
 @media(max-width:540px) { .ink-page .ink-history-grid { grid-template-columns:1fr; } }
 
 .ink-page .ink-setup { display:grid; gap:22px; padding:28px; background:white; border:1px solid #e5e5e5; border-radius:20px; }
@@ -148,8 +171,21 @@
 .ink-page .ink-wizard-thumbs .ink-setup-add > svg { width:24px; height:24px; padding:0; background:none; }
 .ink-page .ink-wizard-thumbs .ink-setup-add:disabled { opacity:.4; cursor:not-allowed; }
 .ink-page .ink-setup-image-actions { gap:8px; }
+.ink-page .ink-setup-photo-reference { display:flex; align-items:center; gap:14px; padding:12px 14px; margin:0 0 16px; border:1px solid var(--lp-border-subtle); border-radius:10px; background:var(--lp-surface-soft); }
+.ink-page .ink-setup-photo-reference img { width:64px; height:80px; object-fit:contain; border-radius:5px; background:var(--lp-surface,#fff); }
+.ink-page .ink-setup-photo-reference strong { display:block; font-size:14px; font-weight:600; }
+.ink-page .ink-setup-photo-reference p { margin:5px 0 0; font-size:13px; line-height:1.6; color:var(--lp-text-muted); }
+.ink-page .ink-setup-photo-reference a { flex-shrink:0; }
 .ink-page .ink-setup-image-actions > button { white-space:nowrap; }
 .ink-page .ink-setup-image-actions > .ink-primary-button { background:#171717; color:#fff; border-color:#171717; }
+.ink-page .ink-setup-feedback { min-width:0; scroll-margin:24px 0 140px; }
+.ink-page .ink-setup-feedback .ink-job-status,
+.ink-page .ink-wizard-action-feedback .ink-job-status { border-radius:10px; background:var(--lp-surface-soft); }
+.ink-page .ink-setup-feedback .ink-job-main,
+.ink-page .ink-wizard-action-feedback .ink-job-main { padding:14px 16px; }
+.ink-page .ink-setup-feedback .is-failed,
+.ink-page .ink-wizard-action-feedback .is-failed { border-color:var(--lp-border-strong); }
+.ink-page .ink-wizard-action-feedback { flex-basis:100%; min-width:0; width:100%; }
 .ink-page .ink-setup-more summary:focus-visible { outline:2px solid var(--lp-text-strong); outline-offset:2px; }
 
 /* Storyboard deletion remains reversible; keep secondary actions compact. */

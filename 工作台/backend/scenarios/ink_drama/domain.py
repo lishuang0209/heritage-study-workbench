@@ -12,7 +12,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from .dialogue import invalid_speakers, speaker_id
 
 STYLE = '淡彩水墨，低饱和配色，留白，保留自然笔触与宣纸质感'
 NEGATIVE = '厚涂油画、磨皮、照片写实、高饱和、3D CG、Q版、赛璐璐平涂、强烈轮廓黑边、文字、水印'
@@ -92,8 +93,13 @@ def caption(raw, allowed_ids=()):
 
 
 class Dialogue(Strict):
-    character_id: str
+    character_id: str = Field(description='出镜人物使用已确认c1或c2；只发声的旁白/解说使用narrator，不加入character_ids')
     text: str = Field(min_length=1, max_length=300)
+
+    @field_validator('character_id', mode='before')
+    @classmethod
+    def normalize_speaker(cls, value):
+        return speaker_id(value)
 
 
 class ShotInput(Strict):
@@ -129,7 +135,7 @@ def board(raw):
             raise UserError('镜头角色 ID 重复')
         if not set(shot['character_ids']) <= set(ids):
             raise UserError('镜头包含未定义角色')
-        if any(d['character_id'] not in shot['character_ids'] for d in shot['dialogues']):
+        if invalid_speakers(shot):
             raise UserError('台词角色必须出现在镜头中')
         shot.update(id=f's{i+1}', revision=1, image=None, image_versions=[], image_stale=False,
                     clip=None, clip_versions=[], clip_stale=False, rendered=None,
@@ -156,6 +162,18 @@ def framing_constraint(shot):
     if not match:
         match = re.search(r'大特写|特写|近景|中近景|中景|全景|远景', shot.get('content', ''))
     scale = match.group() if match else ''
+    if shot.get('character_ids') == []:
+        rules={
+            '大特写':'只展示指定构件的一处可见细节，不扩大到完整建筑。',
+            '特写':'聚焦指定构件局部及必要的连接边界，主体占据主要画幅，不退回建筑全景。',
+            '近景':'展示指定建筑或器物的局部，保留理解形状所需的相邻结构。',
+            '中近景':'展示指定建筑局部及相邻连接关系，不以单个构件填满画面。',
+            '中景':'展示指定建筑部位和周围空间关系，保留构图要求中的定位线索。',
+            '全景':'完整保留指定建筑或器物的外轮廓；建筑应完整展示屋顶、殿身和基座，不因局部参考图改为构件特写。',
+            '远景':'以完整建筑和环境的空间关系为主，局部构件只占较小比例。',
+        }
+        return ('无人画面取景约束：'+scale+'。'+rules.get(scale,'严格按指定主体与构图取景。')+
+                '\n本镜明确构图：'+camera+'。参考图只约束形制和材质，不继承其主体大小、裁切或角度。')
     rules = {
         '大特写': '只展示指定主体的局部细节，局部占据画面主体，不退回人物全身或完整场景。',
         '特写': '按画面内容指定的人脸、手部或道具局部取景，局部占据画面主体；不得为展示完整人物或建筑而拉远。',
@@ -174,6 +192,7 @@ def framing_constraint(shot):
 
 
 def frame_prompt(p, shot):
+    from .media_format import frame_instruction
     from .background import background_context
     from .creative import settings_context
     from .styles import image_style, negative_style, profile_for
@@ -192,7 +211,7 @@ def frame_prompt(p, shot):
             style += '\n已确认水墨特征：' + json.dumps(p['baseline']['ink_style'], ensure_ascii=False)
     # Do not serialize image history/views: those contain previous style descriptions.
     chars = [{k: c[k] for k in ('id', 'character_id', 'name', 'desc') if k in c} for c in chars]
-    return '\n'.join([spatial_prompt(p, shot), framing_constraint(shot), background_context(p), context, '静态首帧（最高优先级）：' + shot['content'],
+    return '\n'.join([frame_instruction(p), spatial_prompt(p, shot), framing_constraint(shot), background_context(p), context, '静态首帧（最高优先级）：' + shot['content'],
                       '严格绘制动作开始前的站位和姿势，不提前完成后续走动、递接或转身。参考人物图只用于外貌和服饰，不继承其画风、笔触、明暗塑形或姿势。',
                       style, '首帧画面内容：' + shot['content'], '场景：' + shot['scene'],
                       '镜头构图：' + shot['camera'],
@@ -204,6 +223,7 @@ def frame_prompt(p, shot):
 
 
 def image_edit_prompt(p, shot):
+    from .media_format import frame_instruction
     # Always include the full current form; changed fields only indicate edit priority.
     labels = {'content': '画面内容', 'scene': '场景', 'camera': '构图', 'motion': '动作与姿势'}
     keys = shot.get('pending_image_edits') or ['motion', 'scene', 'camera']
@@ -219,7 +239,7 @@ def image_edit_prompt(p, shot):
         '以上是当前完整要求，均需满足；如描述有冲突，本次重点调整项优先。',
         '动作修改时重画相关身体朝向、手臂、手指和道具位置，让动作在单幅图片中清楚可见。',
         '新要求优先于原图的动作与构图。保持未要求修改的人物面容、服装、画风和其他区域。',
-        '只输出一张竖屏9:16画面，不添加文字、水印或多格分镜。',
+        frame_instruction(p) + '不添加文字、水印或多格分镜。',
         '避免：' + NEGATIVE,
     ])
 

@@ -13,6 +13,7 @@ import httpx
 import logging
 from openai import OpenAI
 from config import Config
+from models.image_failures import exception_failure
 try:
     from models.image_processor import ImageProcessor
 except ImportError:
@@ -59,6 +60,7 @@ class ImageGPT:
         self.client = OpenAI(**kwargs)
         self.max_attempts = 10
         self.image_processor = ImageProcessor()
+        self.last_error = None
 
     def _encode_image_to_base64(self, image_path: str) -> str:
         """将本地图片转换为 Base64 编码"""
@@ -89,6 +91,8 @@ class ImageGPT:
             image_urls: 参考图片 URL 列表（仅 gpt-image-2 支持）
         """
 
+        self.last_error = None
+        stage = 'request'
         attempts = 0
         last_error = None
         
@@ -135,6 +139,7 @@ class ImageGPT:
                         os.makedirs(save_dir, exist_ok=True)
                         file_name = f"gpt_{int(time.time())}_{uuid.uuid4().hex[:6]}.png"
                         file_path = os.path.join(save_dir, file_name)
+                        stage = 'download'
                         if self.image_processor.download_image(url, file_path, proxies=Config.requests_proxies("openai")):
                             return file_path
                         return url
@@ -142,6 +147,7 @@ class ImageGPT:
                 raise RuntimeError("未在响应中找到 url 或 b64_json")
             except Exception as e:
                 last_error = e
+                self.last_error = exception_failure(e, stage)
                 # Other errors: wait before retry
                 logger.warning("OpenAI image generation failed; retrying in 10 seconds: %s", e)
                 time.sleep(10)

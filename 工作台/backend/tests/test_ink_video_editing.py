@@ -11,7 +11,8 @@ from scenarios.ink_drama.providers import checked_ffmpeg, ffmpeg_executable, Pro
 
 
 @pytest.mark.parametrize('with_audio', [True, False])
-def test_edit_video_submits_source_once_and_retains_source_audio(tmp_path, monkeypatch, with_audio):
+@pytest.mark.parametrize('project_type', ['ink', 'heritage'])
+def test_edit_video_submits_source_once_and_retains_source_audio(tmp_path, monkeypatch, with_audio, project_type):
     from config import Config
     from dashscope import VideoSynthesis
     import requests
@@ -37,7 +38,7 @@ def test_edit_video_submits_source_once_and_retains_source_audio(tmp_path, monke
         def raise_for_status(self): pass
         def iter_content(self, size): yield generated.read_bytes()
     monkeypatch.setattr(requests, 'get', lambda *a, **kw: Download())
-    edit_video(source, '仅放慢右手动作', target, {'creative_settings':{'style':'兼工带写'}})
+    edit_video(source, '仅放慢右手动作', target, {'project_type':project_type,'creative_settings':{'style':'兼工带写'}})
     assert len(submissions) == 1
     request = submissions[0]
     assert request['model'] == 'wan2.7-videoedit'
@@ -46,6 +47,8 @@ def test_edit_video_submits_source_once_and_retains_source_audio(tmp_path, monke
     assert 'duration' not in request and 'ratio' not in request
     assert '仅放慢右手动作' in request['prompt']
     assert Providers().has_audio(target) == with_audio
+    from test_heritage_widescreen import media_size
+    assert media_size(target) == ((1280,720) if project_type == 'heritage' else (240,320))
     if with_audio:
         def audio_bytes(path):
             return subprocess.check_output([ffmpeg_executable(),'-v','error','-i',str(path),'-map','0:a:0','-c','copy','-f','adts','pipe:1'])

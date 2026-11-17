@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from scenarios.ink_drama.domain import UserError
+from .material_import import MAX_MATERIAL_CHARACTERS
 
 
 class Strict(BaseModel):
@@ -46,7 +47,7 @@ class Station(Strict):
     component: str = Field(default='', max_length=80)
     grade: str = Field(default='', max_length=40)
     standing_position: str = Field(default='', max_length=300)
-    checked_description: str = Field(default='', max_length=1500)
+    checked_description: str = Field(default='', max_length=MAX_MATERIAL_CHARACTERS)
     objective: str = Field(default='', max_length=300)
     instruction: str = Field(default='', max_length=600)
     question: str = Field(default='', max_length=160)
@@ -68,7 +69,7 @@ def invalidate(p):
 def crop_bounds(width, height, photo):
     if photo['mode'] == 'contain':
         return (0., 0., 1., 1.)
-    desired = 720/960
+    desired = 16/9
     ratio = width/height
     cw, ch = (desired/ratio, 1.) if ratio > desired else (1., ratio/desired)
     return ((1-cw)*photo['focus_x'], (1-ch)*photo['focus_y'], cw, ch)
@@ -127,13 +128,13 @@ def validate_ready(p, store):
         # Leave room for the stroke and arrow head, not only its center line.
         pad = .012
         if not all(x+pad <= mark[k] <= x+w-pad for k in ('x','x2')) or not all(y+pad <= mark[k] <= y+h-pad for k in ('y','y2')):
-            raise UserError(label+'的标注靠近边缘或在竖屏裁切之外，请调整标注或使用完整保留')
+            raise UserError(label+'的标注靠近边缘或在横屏裁切之外，请调整标注或使用完整保留')
     return station
 
 
 def snapshot(p):
     timing = {'timing':p['heritage_timing'],'timing_version':p.get('heritage_timing_version',0)} if p.get('heritage_timing') else {}
-    return hashlib.sha256(json.dumps({'version':p.get('heritage_version',0),
+    return hashlib.sha256(json.dumps({'layout':'landscape-v1','version':p.get('heritage_version',0),
         'station':p.get('heritage_station'), 'script':p.get('heritage_script'), **timing,
         'shots':[(s['id'],s.get('revision'),s.get('rendered')) for s in p['shots']]},
         sort_keys=True,ensure_ascii=False).encode()).hexdigest()
@@ -153,10 +154,13 @@ def decorate(p):
         photo = p['heritage_station'].get(slot)
         if photo:
             photo['url'] = f'/api/ink/projects/{pid}/assets/{photo["image"]}'
-            photo['preview_url'] = f'/api/ink/projects/{pid}/heritage/photos/{slot}/preview?v={version}'
+            photo['preview_url'] = f'/api/ink/projects/{pid}/heritage/photos/{slot}/preview?v={version}&layout=landscape-v1'
     p['heritage_ready'] = p.get('heritage_confirmed_version') == version
     p['task_card_url'] = f'/api/ink/projects/{pid}/assets/{p["task_card"]}' if p.get('task_card') else None
     if p.get('heritage_export_stamp') != current_stamp:
         if p.get('final'): p['final_stale'] = True
         if p.get('task_card'): p['task_card_stale'] = True
-    return p
+    if p.get('final') and p.get('final_media_format', {}).get('ratio') != '16:9':
+        p['final_stale'] = True
+    from .visual_reference import decorate_references
+    return decorate_references(p)

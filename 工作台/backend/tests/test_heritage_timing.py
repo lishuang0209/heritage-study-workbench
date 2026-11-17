@@ -116,8 +116,10 @@ def test_real_custom_movie_uses_requested_45_seconds_and_chapter_boundaries(setu
     chapters=export_video(facade,p,clean(p['heritage_station']),p['heritage_script'],tmp_path,target)
     assert [(c['kind'],c['duration']) for c in chapters]==[('story',20),('panorama',9),('detail',6),('task',10)]
     assert abs(Providers().duration(target)-45)<.1
+    from test_heritage_widescreen import media_size
+    assert media_size(target)==(1280,720) and Providers().has_audio(target)
     for second,color in ((19.5,(255,0,0)),(20.5,(0,128,0)),(29.5,(0,0,255)),(35.5,(0,0,255))):
-        pixel=subprocess.check_output([ffmpeg_executable(),'-v','error','-ss',str(second),'-i',str(target),'-frames:v','1','-vf','crop=1:1:400:600,format=rgb24','-f','rawvideo','pipe:1'])
+        pixel=subprocess.check_output([ffmpeg_executable(),'-v','error','-ss',str(second),'-i',str(target),'-frames:v','1','-vf','crop=1:1:520:300,format=rgb24','-f','rawvideo','pipe:1'])
         assert max(abs(a-b) for a,b in zip(pixel,color))<20
 
 

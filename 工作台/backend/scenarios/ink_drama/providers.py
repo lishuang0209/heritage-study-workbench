@@ -9,6 +9,7 @@ from pathlib import Path
 from config import Config
 from .domain import STYLE, NEGATIVE, Caption, UserError, board, caption
 from .styles import caption_guidance, video_prompt, negative_style
+from .media_format import ratio_for, dimensions, fit_filter, video_frame
 
 
 VIDEO_MODES = {
@@ -71,10 +72,14 @@ def checked_ffmpeg(args):
 
 
 class Providers:
-    def split(self, script):
+    def split(self, script, *, settings=None, planning=None):
         from models.llm_client import LLM
         from .storyboard import split_storyboard
-        return split_storyboard(script, lambda prompt: LLM().query(prompt, model=Config.LLM_MODEL))
+        query = lambda prompt: LLM().query(prompt, model=Config.LLM_MODEL)
+        if planning and planning.get('kind') == 'heritage-history' and settings is not None and not settings['characters']:
+            from scenarios.heritage_study.storyboard import history_board
+            return history_board(planning['narration'], query, settings, planning['duration_seconds'])
+        return split_storyboard(script, query, settings=settings, planning=planning)
 
     def extract_settings(self, script):
         from models.llm_client import LLM
@@ -88,15 +93,39 @@ class Providers:
         data['style'] = '水墨风格 · 兼工带写，人物细致，景物写意，工笔细线条、简笔写意、淡墨晕染，留白多，晕染弱，低饱和配色，宣纸质感'
         return data
 
+    def check_image_configuration(self, refs):
+        from config import PROVIDERS
+        from models.config_model import resolve_provider
+        model = (Config.IMAGE_IT2I_MODEL if refs else Config.IMAGE_T2I_MODEL) or 'wan2.7-image'
+        provider = resolve_provider(model)
+        if not provider:
+            # Match ImageClient's fallback for unregistered provider model IDs.
+            name = model.lower()
+            provider = 'ark' if 'seedream' in name else 'openai' if 'gpt' in name or 'sora' in name else 'dashscope'
+        if provider not in {'ark', 'openai', 'dashscope'}:
+            raise UserError('当前图像模型的服务商尚未接入，请在右上角“模型与 API”中重新选择图片模型')
+        if not str(getattr(Config, provider.upper() + '_API_KEY', '') or '').strip():
+            label = PROVIDERS[provider]['label']
+            raise UserError(f'当前生图使用{label}，尚未配置 API Key。请打开右上角“模型与 API”，在“{label}”中填写密钥并保存，再手动重试；已有图片和文字已保留。')
+        return model
+
     def image(self, prompt, refs, folder, pid, ratio='9:16'):
+        model = self.check_image_configuration(refs)
+        from config import PROVIDERS
+        from models.image_failures import ImageFailure
         from models.image_client import ImageClient
         from .styles import clean_image_prompt
         prompt = clean_image_prompt(prompt)
-        paths = ImageClient().generate_image(prompt=prompt, image_paths=refs or None,
-                    model=Config.IMAGE_IT2I_MODEL if refs else Config.IMAGE_T2I_MODEL,
+        client = ImageClient()
+        paths = client.generate_image(prompt=prompt, image_paths=refs or None,
+                    model=model,
                     save_dir=str(folder), session_id=pid, video_ratio=ratio, resolution='720P')
         if not paths:
-            raise UserError('图像服务没有返回可用图片')
+            from models.config_model import resolve_provider
+            provider = resolve_provider(model) or ('ark' if 'seedream' in model.lower() else 'openai' if 'gpt' in model.lower() or 'sora' in model.lower() else 'dashscope')
+            label = PROVIDERS[provider]['label']
+            failure = getattr(client, 'last_error', None) or ImageFailure('empty', 'response')
+            raise UserError(failure.message(label))
         return Path(paths[0])
 
     def analyze(self, image, p):
@@ -145,11 +174,13 @@ schema：''' + json.dumps(Caption.model_json_schema(), ensure_ascii=False)
 
     def video(self, image, motion, target, project=None, duration_seconds=5, mode='first_frame', last_image=None, references=None):
         from models.video_client import VideoClient
+        image = video_frame(image, project or {}, target.parent) if mode != 'reference' else image
+        last_image = video_frame(last_image, project or {}, target.parent)
         request = dict(prompt=video_prompt(project or {}, motion),
              image_path=str(image) if mode != 'reference' else None, save_path=str(target), model=video_model(mode),
              last_image_path=str(last_image) if last_image else None,
              reference_image_paths=references if mode == 'reference' else None,
-             duration=duration_seconds, shot_type='single', video_ratio='9:16', resolution='720P',
+             duration=duration_seconds, shot_type='single', video_ratio=ratio_for(project or {}), resolution='720P',
              negative_prompt=negative_style(project or {}), generate_audio=False)
         from models.config_model import resolve_provider
         if resolve_provider(request['model']) == 'dashscope':
@@ -204,7 +235,7 @@ schema：''' + json.dumps(Caption.model_json_schema(), ensure_ascii=False)
             raise UserError('无法读取媒体时长，请核对音视频文件')
         return int(match[1]) * 3600 + int(match[2]) * 60 + float(match[3])
 
-    def render(self, video, lines, folder, target, duration_seconds=5):
+    def render(self, video, lines, folder, target, duration_seconds=5, ratio='9:16'):
         from pipelines.utils import write_ass_subtitles, _ffmpeg_filter_path
         # Match the selected shot duration; pad short dialogue with silence.
         audio = folder / (target.stem + '.m4a')
@@ -219,17 +250,17 @@ schema：''' + json.dumps(Caption.model_json_schema(), ensure_ascii=False)
             checked_ffmpeg(['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-t', str(duration_seconds), str(audio)])
         mux = folder / (target.stem + '-mux.mp4')
         checked_ffmpeg(['-i', str(video), '-i', str(audio), '-map', '0:v:0', '-map', '1:a:0',
-                        '-t', str(duration_seconds), '-vf', 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1',
+                        '-t', str(duration_seconds), '-vf', fit_filter(ratio),
                         '-r', '24', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ar', '48000', '-ac', '2', str(mux)])
         if lines:
             subtitle = folder / (target.stem + '.ass')
-            write_ass_subtitles(str(subtitle), subtitles=[(text, duration) for text, duration, _ in lines], video_ratio='9:16')
+            write_ass_subtitles(str(subtitle), subtitles=[(text, duration) for text, duration, _ in lines], video_ratio=ratio)
             checked_ffmpeg(['-i', str(mux), '-vf', f"ass=filename='{_ffmpeg_filter_path(str(subtitle))}'",
                             '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'copy', str(target)])
         else:
             shutil.copy2(mux, target)
 
-    def assemble(self, clips, music, folder, target):
+    def assemble(self, clips, music, folder, target, ratio='9:16'):
         if not 1 <= len(clips) <= 6:
             raise UserError('请完成1—6个片段后再合成')
         inputs, filters, lengths = [], [], []
@@ -242,8 +273,7 @@ schema：''' + json.dumps(Caption.model_json_schema(), ensure_ascii=False)
             lengths.append(length)
             inputs += ['-i', str(clip)]
             filters.append(
-                f'[{i}:v:0]setpts=PTS-STARTPTS,scale=720:1280:force_original_aspect_ratio=decrease,'
-                f'pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,'
+                f'[{i}:v:0]setpts=PTS-STARTPTS,{fit_filter(ratio)},fps=30,'
                 f'tpad=stop_mode=clone:stop_duration={length},trim=duration={length},'
                 f'settb=AVTB,setpts=PTS-STARTPTS[v{i}]')
             if self.has_audio(clip):
@@ -269,6 +299,6 @@ schema：''' + json.dumps(Caption.model_json_schema(), ensure_ascii=False)
         if abs(self.duration(target) - sum(lengths)) > .15:
             raise UserError('合成时长与各片段之和不符，未替换当前成片，原始视频已保留')
         target.with_suffix('.assembly.json').write_text(json.dumps(dict(
-            recipe='normalized-concat-v2', fps=30, audio_rate=48000, duration=sum(lengths),
+            recipe='normalized-concat-v2', ratio=ratio, dimensions=dimensions(ratio), fps=30, audio_rate=48000, duration=sum(lengths),
             shots=[dict(video=clip.name, duration=length) for clip, length in zip(clips, lengths)]),
             ensure_ascii=False, indent=2))

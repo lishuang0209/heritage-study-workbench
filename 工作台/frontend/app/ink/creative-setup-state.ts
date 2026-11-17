@@ -1,4 +1,16 @@
-import type { CreativeSettings, SettingAsset } from './ink-shared';
+import type { CreativeSettings, SettingAsset, Job } from './ink-shared';
+
+export type SetupGeneration = {key:string;name:string;style:string;job:Job};
+
+// A fresh click owns feedback immediately, before the API returns a persisted job.
+export function setupGenerationJob(jobs:Job[], generation:SetupGeneration|null, currentKey:string):Job|undefined {
+  if (generation) {
+    if (generation.key !== currentKey) return undefined;
+    return jobs.find(job => job.id === generation.job.id) || generation.job;
+  }
+  const latest=jobs[0];
+  return latest?.action === 'asset-image' && latest.state !== 'completed' ? latest : undefined;
+}
 
 export type SetupStep = {
   group: 'characters' | 'scenes' | 'props';

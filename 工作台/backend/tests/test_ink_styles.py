@@ -44,8 +44,11 @@ def test_legacy_custom_and_explicit_reference_choice():
 
 
 def test_actual_image_request_has_no_text_instruction(monkeypatch, tmp_path):
+    from config import Config
     from scenarios.ink_drama.providers import Providers
     from models.image_client import ImageClient
+    monkeypatch.setattr(Config, 'IMAGE_T2I_MODEL', 'doubao-seedream-5-0-260128')
+    monkeypatch.setattr(Config, 'ARK_API_KEY', 'test-ark-key')
     captured = {}
     def generate(self, **kwargs):
         captured.update(kwargs)

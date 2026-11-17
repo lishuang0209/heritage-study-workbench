@@ -14,6 +14,7 @@ import dashscope
 from dashscope import MultiModalConversation
 from dashscope.aigc.image_generation import ImageGeneration
 from config import Config
+from models.image_failures import ImageFailure, exception_failure, response_failure
 try:
     from models.image_processor import ImageProcessor
 except ImportError:
@@ -27,11 +28,14 @@ class DashScopeClient:
         dashscope.api_key = self.api_key
         dashscope.base_http_api_url = self.base_url
         self.image_processor = ImageProcessor()
+        self.last_error = None
 
     def generate_image(self, prompt, model="wan2.7-image", size="1024*1024", n=1, session_id=None, save_dir=None):
         """
         Text to Image generation using DashScope
         """
+        self.last_error = None
+        stage = 'request'
         try:
             messages = [{"role": "user", "content": [{"text": prompt}]}]
             response = ImageGeneration.call(
@@ -53,9 +57,14 @@ class DashScopeClient:
                                 results.append(item['message']['content'][0]['image'])
                 except Exception as e:
                     logging.error(f"Failed to parse ImageGeneration outputs: {e}")
+                    self.last_error = ImageFailure('parse', 'response')
+
+                if not results:
+                    self.last_error = self.last_error or ImageFailure('empty', 'response')
                 
                 # Check if we should download
                 if save_dir:
+                    stage = 'download'
                     os.makedirs(save_dir, exist_ok=True)
                     local_files = []
                     for i, url in enumerate(results):
@@ -63,13 +72,17 @@ class DashScopeClient:
                         file_path = os.path.join(save_dir, file_name)
                         if self.image_processor.download_image(url, file_path, proxies=Config.requests_proxies("dashscope")):
                             local_files.append(file_path)
+                    if not local_files and results:
+                        self.last_error = ImageFailure('download', 'download')
                     return local_files
                 
                 return results
             else:
+                self.last_error = response_failure(response.status_code, getattr(response, 'code', ''))
                 logging.error(f"Image generation failed: {response.code}, {response.message}, status={response.status_code}")
                 return []
         except Exception as e:
+            self.last_error = exception_failure(e, stage)
             logging.error(f"Error in generate_image (DashScope): {e}")
             return []
 
@@ -77,6 +90,8 @@ class DashScopeClient:
         """
         Image editing/compositing using DashScope ImageGeneration
         """
+        self.last_error = None
+        stage = 'request'
         # Prepare content
         content_list = []
         for img_url in image_urls:
@@ -121,9 +136,14 @@ class DashScopeClient:
                                                 results.append(c['image'])
                 except Exception as e:
                     logging.error(f"Failed to parse ImageGeneration outputs: {e}")
+                    self.last_error = ImageFailure('parse', 'response')
+
+                if not results:
+                    self.last_error = self.last_error or ImageFailure('empty', 'response')
 
                 # Check if we should download
                 if save_dir:
+                    stage = 'download'
                     os.makedirs(save_dir, exist_ok=True)
                     local_files = []
                     for i, url in enumerate(results):
@@ -131,13 +151,17 @@ class DashScopeClient:
                         file_path = os.path.join(save_dir, file_name)
                         if self.image_processor.download_image(url, file_path, proxies=Config.requests_proxies("dashscope")):
                             local_files.append(file_path)
+                    if not local_files and results:
+                        self.last_error = ImageFailure('download', 'download')
                     return local_files
 
                 return results
             else:
+                self.last_error = response_failure(response.status_code, getattr(response, 'code', ''))
                 logging.error(f"Image edit failed: {response.code}, {response.message}, status={response.status_code}")
                 return []
         except Exception as e:
+            self.last_error = exception_failure(e, stage)
             logging.error(f"Error in edit_image: {e}")
             return []
 

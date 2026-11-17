@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {mergeHistoryMaterial,narrationEstimate} from './state.ts';
 import {blankStation,completeStationDraft,observationGuidance,selectPhotoCredits,reviewStation,reviewScript,scriptIsConfirmed,derivedDetailStale,projectTiming,timingError,observationSplit,stationPayload,point} from './state.ts';
 test('photo save strips display URLs without removing normalized marks or credits',()=>{
  const station=blankStation();station.panorama={image:'photo.jpg',source:'teacher',author:'author',license:'licensed',mark:{kind:'arrow',x:.1,y:.2,x2:.3,y2:.4},mode:'cover',focus_x:.5,focus_y:.5,url:'/asset',preview_url:'/preview'};
@@ -149,4 +150,20 @@ test('observation split matches displayed chapter durations and preserves the to
  assert.deepEqual(observationSplit(11,true),{panorama:6,detail:5});
  assert.deepEqual(observationSplit(15,true),{panorama:9,detail:6});
  assert.deepEqual(observationSplit(20,false),{panorama:20,detail:0});
+});
+
+test('adding complete case history retains teacher text and avoids repeating existing facts and links', () => {
+  const original='历史背景：北宋重建。\n观察重点：沿柱子看。\n资料来源：https://example.invalid';
+  const history='北宋重建。清代修缮。列入文物保护单位。';
+  const sources=[{title:'博物馆',url:'https://example.invalid'}];
+  const merged=mergeHistoryMaterial(original,history,sources);
+  assert.ok(merged.startsWith(original));
+  assert.equal(merged.match(/北宋重建/g).length,1);
+  assert.ok(merged.includes('清代修缮'));
+  assert.equal(mergeHistoryMaterial(merged,history,sources),merged);
+});
+
+test('narration timing feedback uses the current editable words and remains an estimate', () => {
+  assert.deepEqual(narrationEstimate(''),{characters:0,minimum:0,maximum:0});
+  assert.deepEqual(narrationEstimate('一二三四五六七八九十\n'),{characters:10,minimum:3,maximum:4});
 });

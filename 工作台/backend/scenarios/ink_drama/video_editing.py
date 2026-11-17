@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from .domain import UserError
 from .styles import video_style_lock
+from .media_format import generation_options, fit_filter, format_for
 
 MODEL = 'wan2.7-videoedit'
 
@@ -80,9 +81,12 @@ def edit_video(source, instruction, target, project):
         raise UserError('编辑结果时长与底稿不一致，未采用候选；原视频已保留')
     # Preserve the exact selected source's audio independently of model compliance.
     args = ['-i', str(raw), '-i', str(source), '-map', '0:v:0', '-c:v', 'copy']
+    if generation_options(project):
+        args = ['-i', str(raw), '-i', str(source), '-map', '0:v:0', '-vf', fit_filter('16:9'),
+                '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p']
     args += ['-map', '1:a:0', '-c:a', 'copy'] if media.has_audio(source) else ['-an']
     checked_ffmpeg([*args, '-movflags', '+faststart', str(target)])
-    snapshot.update(state='completed'); save()
+    snapshot.update(state='completed', media_format=format_for(project)); save()
 
 
 def install(api):

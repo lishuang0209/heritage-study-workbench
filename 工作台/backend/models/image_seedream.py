@@ -17,6 +17,7 @@ import httpx
 from typing import Optional, List, Dict
 from openai import OpenAI
 from config import Config
+from models.image_failures import exception_failure
 
 # 模型名称映射表（旧名称 -> 新名称）
 MODEL_NAME_MAP: Dict[str, str] = {
@@ -65,6 +66,7 @@ class SeedreamClient:
         self.api_key = api_key or Config.ARK_API_KEY
         self.base_url = base_url or Config.ARK_BASE_URL or "https://ark.cn-beijing.volces.com/api/v3"
         self.timeout = timeout
+        self.last_error = None
 
         if not self.api_key:
             logging.warning(
@@ -104,6 +106,7 @@ class SeedreamClient:
         Returns:
             生成的图片路径列表
         """
+        self.last_error = None
         if not self.api_key:
             raise RuntimeError("ARK_API_KEY not set.")
 
@@ -245,6 +248,7 @@ class SeedreamClient:
                 f.write(response.content)
             return file_path
         except Exception as e:
+            self.last_error = exception_failure(e, 'download')
             logging.error(f"Failed to download image from {url}: {e}")
             return None
 

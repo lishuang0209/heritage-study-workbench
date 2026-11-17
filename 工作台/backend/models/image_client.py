@@ -13,6 +13,7 @@ import logging
 from typing import List, Optional
 from config import Config
 from models.config_model import resolve_provider
+from models.image_failures import ImageFailure, exception_failure
 
 try:
     from models.image_dashscope import DashScopeClient
@@ -52,6 +53,7 @@ class ImageClient:
         self._dashscope_client = None
         self._seedream_client = None
         self._gpt_client = None
+        self.last_error = None
 
         # Initialize Image Processor for downloads
         self.image_processor = ImageProcessor()
@@ -111,6 +113,7 @@ class ImageClient:
         Returns:
             List of absolute file paths of the generated images.
         """
+        self.last_error = None
         # Determine size from video_ratio and resolution
         size_map = {
             "16:9": {
@@ -211,6 +214,7 @@ class ImageClient:
                     generated_local_paths.extend(paths)
 
             except Exception as e:
+                self.last_error = getattr(self._seedream_client, 'last_error', None) or exception_failure(e)
                 logger.exception("Seedream generation failed: %s", e)
 
         elif is_sora:
@@ -237,6 +241,7 @@ class ImageClient:
                     logger.error("GPT/Sora returned invalid path or download failed: %s", path)
 
             except Exception as e:
+                self.last_error = getattr(self._gpt_client, 'last_error', None) or exception_failure(e)
                 logger.exception("GPT/Sora generation failed: %s", e)
 
         else:
@@ -279,6 +284,10 @@ class ImageClient:
                     generated_local_paths.extend(paths)
                             
             except Exception as e:
+                self.last_error = getattr(self._dashscope_client, 'last_error', None) or exception_failure(e)
                 logger.exception("DashScope generation failed: %s", e)
 
+        if not generated_local_paths and self.last_error is None:
+            client = self._seedream_client if is_seedream else self._gpt_client if is_sora else self._dashscope_client
+            self.last_error = getattr(client, 'last_error', None) or ImageFailure('empty', 'response')
         return generated_local_paths

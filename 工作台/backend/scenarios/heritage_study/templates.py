@@ -1,13 +1,25 @@
 """Only teacher-provided facts enter the editable educational narrative."""
 import re
 
+from scenarios.ink_drama.domain import UserError
 from .domain import observation_guidance
 from .timing import Timing
 
+BAOGUO_HISTORY = ('宁波保国寺大殿重建于北宋大中祥符六年，也就是1013年，寺院位于灵山。'
+                   '寺院前身名为灵山寺，唐代重建时获赐“保国”寺额。'
+                   '大殿保留了宋代木构的重要形制，是研究古代营造技术的实物资料。'
+                   '清代的大修又留下新的建筑痕迹，今天看到的构件并非全部属于北宋。'
+                   '1961年，保国寺被公布为第一批全国重点文物保护单位。')
+BAOGUO_SOURCES = [
+    dict(title='中国港口博物馆：保国寺北宋大殿价值解读',url='https://www.portmuseum.cn/doc/sx/gbzx/read/38733.shtml'),
+    dict(title='宁波日报：保国寺沿革与营造技术',url='https://daily.cnnb.com.cn/nbrb/html/2016-12/08/content_1015372.htm?div=0'),
+    dict(title='人民日报海外版：宁波保国寺树碑迎千岁',url='https://paper.people.com.cn/rmrbhwb/html/2013-12/11/content_1360301.htm'),
+]
+
 CASES = [
- dict(id='baoguo', title='保国寺 · 找斗拱', history='保国寺大殿重建于北宋大中祥符六年（1013年），后来在清代经历修缮。', sources=[dict(title='中国港口博物馆：保国寺北宋大殿价值解读',url='https://www.portmuseum.cn/doc/sx/gbzx/read/38733.shtml')], station=dict(building='宁波保国寺大殿',name='找斗拱',component='斗拱',
+ dict(id='baoguo', title='保国寺 · 找斗拱', history=BAOGUO_HISTORY, sources=BAOGUO_SOURCES, station=dict(building='宁波保国寺大殿',name='找斗拱',component='斗拱',
       grade='小学三至六年级',standing_position='',
-      checked_description='历史背景：保国寺大殿重建于北宋大中祥符六年（1013年），后来在清代经历修缮。\n观察重点：观察柱子上方层层向外伸出的木构件。\n现场核对：现状包含清代加建外檐，不能将照片中所有木构件都视为北宋原构。\n资料来源：中国港口博物馆 https://www.portmuseum.cn/doc/sx/gbzx/read/38733.shtml',
+      checked_description='历史背景：'+BAOGUO_HISTORY+'\n观察重点：观察柱子上方层层向外伸出的木构件。\n现场核对：现状包含清代加建外檐，不能将照片中所有木构件都视为北宋原构。\n'+ '\n'.join('资料来源：'+source['title']+' '+source['url'] for source in BAOGUO_SOURCES),
       objective='沿实拍图的柱子向上找到同一组斗拱，并观察向外伸出的部分。',
       instruction='在老师指定位置，沿照片标出的柱子向上找，指出同一组斗拱，再指出向外伸出的部分。',question='哪一层木构件伸得最远？'),
       intro='保国寺大殿重建于北宋，后来也经历了修缮。今天，我们从斗拱开始观察。'),
@@ -26,22 +38,33 @@ CASES = [
 HISTORY_PLACEHOLDER = '【待补充历史背景】'
 
 
+HISTORY_LABELS = '历史背景|地方历史|历史资料|历史|寺名沿革|重建年代|建筑价值|修缮沿革|保护意义'
+OBSERVATION_LABELS = '观察重点|构件特点|构件知识'
+NOTE_LABELS = '资料来源|参考来源|来源|现场核对|待老师核对|待核对|注意'
+MATERIAL_LABELS = '资料内容|导入资料'
+
+
 def research_material(text):
-    history=[];observation=[];fallback=[]
-    text=re.sub(r'[；;]\s*(?=(?:历史背景|地方历史|历史资料|历史|观察重点|构件特点|构件知识|资料来源|参考来源|来源|现场核对|待老师核对|待核对|注意)[:：])','\n',text)
+    history=[];observation=[];fallback=[];section=None
+    labels=HISTORY_LABELS+'|'+OBSERVATION_LABELS+'|'+NOTE_LABELS+'|'+MATERIAL_LABELS
+    text=re.sub(r'[；;]\s*(?=(?:'+labels+r')[:：])','\n',text)
     for line in text.splitlines():
-        line=line.strip()
-        if not line or re.match(r'^(资料来源|参考来源|来源|现场核对|待老师核对|待核对|注意)[:：]',line):continue
-        # Sources and preparation notes are never spoken narration.
+        line=re.sub(r'^[\s>*•-]+','',line).strip()
+        if not line:continue
+        label=re.match(r'^('+labels+r')[:：]\s*(.*)',line)
+        if label:
+            name,line=label.groups()
+            section='history' if name in HISTORY_LABELS.split('|') else 'observation' if name in OBSERVATION_LABELS.split('|') else 'material' if name in MATERIAL_LABELS.split('|') else 'skip'
+        if section=='skip':continue
         line=re.sub(r'https?://\S+','',line).strip()
-        historical=re.match(r'^(历史背景|地方历史|历史资料|历史)[:：]\s*(.+)',line)
-        observed=re.match(r'^(观察重点|构件特点|构件知识)[:：]\s*(.+)',line)
-        if historical:history.extend(re.split(r'[。！？!?]',historical[2]))
-        elif observed:observation.extend(re.split(r'[。！？!?]',observed[2]))
+        sentences=[x.strip() for x in re.split(r'[。！？!?]',line) if x.strip()]
+        if section=='history':history.extend(sentences)
+        elif section=='observation':observation.extend(sentences)
+        elif section=='material':
+            history.extend(x for x in sentences if re.search(r'始建|重建|修缮|曾是|曾经|朝代|北宋|南宋|唐代|元代|明代|清代|清康熙|[0-9]{3,4}年',x))
         else:
-            for sentence in re.split(r'[。！？!?]',line):
-                if re.search(r'始建|重建|修缮|历史|曾是|曾经|朝代|北宋|南宋|明代|清代|清康熙|[0-9]{3,4}年',sentence):fallback.append(sentence)
-    return ([x.strip() for x in (history or fallback) if x.strip()],[x.strip() for x in observation if x.strip()])
+            fallback.extend(x for x in sentences if re.search(r'始建|重建|修缮|历史|曾是|曾经|朝代|北宋|南宋|明代|清代|清康熙|[0-9]{3,4}年',x))
+    return (list(dict.fromkeys(history or fallback)),list(dict.fromkeys(observation)))
 
 
 def research_excerpt(text):
@@ -54,15 +77,17 @@ def script_from_station(station,timing=None):
     histories,observations=research_material(station['checked_description'])
     history=histories[0] if histories else '';observation=observations[0] if observations else ''
     if history:
-        case=next((c for c in CASES if c['station']['building']==station['building'] and c['station']['component']==station['component'] and history.rstrip('。')==c['history'].rstrip('。')),None)
-        if case and timing['intro']<=12:intro=case['intro']
-        else:
-            prefix='' if case or station['building'] in history else station['building']+'。'
-            bridge='今天，我们从'+station['component']+'开始观察。'
-            selected=history+'。'
-            for fact in histories[1:]:
-                if len(prefix+selected+fact+'。'+bridge)<=min(400,timing['intro']*4):selected+=fact+'。'
-            intro=prefix+selected+bridge
+        prefix='' if station['building'] in history else station['building']+'。'
+        bridge='接下来，抬头寻找'+station['component']+'。'
+        selected=history+'。'
+        # Keep complete supplied facts; longer budgets admit more history, not
+        # a fixed case-specific two-sentence opening. Never invent filler.
+        for fact in histories[1:]:
+            if len(prefix+selected+fact+'。'+bridge)<=min(400,timing['intro']*4):
+                selected+=fact+'。'
+        intro=prefix+selected+bridge
+        if len(intro)>400:
+            raise UserError('首条历史资料过长，请拆成多个完整事实后起草；原脚本已保留')
     else:
         intro=HISTORY_PLACEHOLDER+'请在研学资料中补充一条已核对的地方历史，再引出'+station['component']+'。'
     guidance=observation_guidance(station) or '请对照标注，找到'+station['component']+'。'

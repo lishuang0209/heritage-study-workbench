@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { nextShotStep, imageReady, adjustmentPlan, unlockedStage, resumeStage, missingCharacters, referenceShot, soundReady, previewVideo, videoEditSource } from './wizard-state.ts';
+import { nextShotStep, imageReady, imageGenerationPlan, adjustmentPlan, unlockedStage, resumeStage, missingCharacters, referenceShot, soundReady, previewVideo, videoEditSource } from './wizard-state.ts';
 function project() {
   return { characters: [{ id: 'c1' }, { id: 'c2' }], baseline: null, shots: [
     { id: 's1', character_ids: ['c1'], image_url: null },
@@ -128,4 +128,16 @@ test('video editing reopens on the currently previewed version after video repla
   assert.equal(videoEditSource([old, fresh], null), 'new.mp4');
   assert.equal(videoEditSource([old], '/missing'), '');
   assert.equal(videoEditSource([], null), '');
+});
+
+test('a retained stale image defaults to regeneration preview rather than confirming the old image', () => {
+  const plan=imageGenerationPlan({image_url:'/old.png',image_stale:true},4);
+  assert.equal(plan.mode,'preview');
+  assert.equal(plan.label,'按新分镜重新生成');
+  assert.ok(!plan.label.includes('保留'));
+});
+
+test('first image generation and optional regeneration have distinct plans', () => {
+  assert.deepEqual(imageGenerationPlan({image_url:null,image_stale:false},6),{label:'生成第 6 镜图片',mode:'direct'});
+  assert.deepEqual(imageGenerationPlan({image_url:'/current.png',image_stale:false}),{label:'重新生成图片',mode:'preview'});
 });

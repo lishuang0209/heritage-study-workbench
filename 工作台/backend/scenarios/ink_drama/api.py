@@ -27,8 +27,11 @@ from .providers import Providers, video_durations, video_modes, video_model
 from .styles import image_style, negative_style, with_style_reference, profile_for, check_material_styles, style_observation, check_frame_style, restyle_request, restyle_change_warning
 from .background import background_context
 from .identity import detail_request
+from .dialogue import NARRATOR, NARRATION_RULE, invalid_speakers, native_dialogue_prompt
 from .asset_history import remember as remember_setting_image, remember_settings, versions as setting_versions
 from .creative import CreativeSettings, validate_settings, apply_settings, check_references, check_visible_characters
+from .media_format import format_for, generation_options, frame_instruction
+from .history_retention import annotated_versions
 
 LOG = logging.getLogger(__name__)
 router = APIRouter(prefix='/api/ink', tags=['Ink demo'])
@@ -36,7 +39,7 @@ store = Store(os.environ.get('SFA_INK_DATA_DIR') or Path(__file__).resolve().par
 store.recover()
 providers = Providers()
 pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='ink-demo')
-VOICES = {'c1': 'zh-CN-YunjianNeural', 'c2': 'zh-CN-XiaoxiaoNeural'}
+VOICES = {'c1': 'zh-CN-YunjianNeural', 'c2': 'zh-CN-XiaoxiaoNeural', NARRATOR: 'zh-CN-YunjianNeural'}
 ZERO = dict(text=0, vl=0, image=0, video=0, speech=0)
 mutation_lock = RLock()
 
@@ -223,7 +226,7 @@ def remember_image(s, name, snapshot=None, prompt='', state='history', mode='gen
         history[name]['state'] = state
 
 
-def image_history(p, s):
+def image_history(p, s, include_deleted=False):
     entries = copy.deepcopy(s.get('image_history', {}))
     names = list(s.get('image_versions', [])) + [s.get('image')]
     proposal = s.get('image_proposal')
@@ -247,10 +250,13 @@ def image_history(p, s):
         item['image_url'] = f'/api/ink/projects/{p["id"]}/assets/{name}'
         item['has_snapshot'] = bool(item.get('shot'))
         result.append(item)
-    return sorted(result, key=lambda item: item['created'], reverse=True)
+    protected = {s.get('image'): '正在使用的图片不能删除，请先采用其他版本'}
+    if proposal: protected[proposal['image']] = '候选待确认，请先采用或放弃候选'
+    return annotated_versions(p, 'image', s['id'], sorted(result, key=lambda item: item['created'], reverse=True),
+                              'image', protected, include_deleted)
 
 
-def video_history(p, shot):
+def video_history(p, shot, include_deleted=False):
     # Legacy renders used the source clip stem. Only collect files associated
     # with this shot, never every mp4 in the project's shared asset directory.
     clips = set(shot.get('clip_versions', [])) | {shot.get('clip')}
@@ -271,11 +277,19 @@ def video_history(p, shot):
                                created=path.stat().st_mtime, kind='edited' if name in shot.get('video_edit_versions', []) else kind, current=name == active,
                                needs_confirmation=bool(name == active and any(shot.get(key) for key in
                                    ('image_stale', 'clip_stale', 'rendered_stale')))))
-    return sorted(result, key=lambda item: item['created'], reverse=True)
+    protected = {shot.get('clip'): '当前视频底稿不能删除，请先更换视频',
+                 shot.get('rendered'): '正在使用的视频不能删除，请先采用其他版本'}
+    for key in ('video_proposal', 'video_edit_draft'):
+        for field in ('video', 'source'):
+            name = (shot.get(key) or {}).get(field)
+            if name: protected[name] = '视频调整仍在使用此版本，请先处理调整候选或草稿'
+    return annotated_versions(p, 'video', shot['id'], sorted(result, key=lambda item: item['created'], reverse=True),
+                              'video', protected, include_deleted)
 
 
 def public(p):
     p = copy.deepcopy(p)
+    p['media_format'] = format_for(p)
     p['jobs'] = store.jobs(p['id'])
     p['video_durations'] = video_durations()
     p['video_modes'] = video_modes()
@@ -321,6 +335,18 @@ def call(user, kind, pid, fn):
     return result
 
 
+def call_image(user, pid, prompt, refs, folder, **options):
+    project = store.load(pid)
+    if project.get('project_type') == 'heritage':
+        options.setdefault('ratio', format_for(project)['ratio'])
+        prompt += '\n' + frame_instruction(project)
+    # A known missing credential is a local validation failure, not a provider call.
+    check = getattr(providers, 'check_image_configuration', None)
+    if check:
+        check(refs)
+    return call(user, 'image', pid, lambda: providers.image(prompt, refs, folder, pid, **options))
+
+
 def differences(observed, baseline):
     if not baseline:
         return []
@@ -362,7 +388,7 @@ def add_shot_sound(p, s, user, folder, stem):
         if total > duration_seconds:
             raise UserError(f'本镜头配音累计{total:.1f}秒，超过{duration_seconds}秒。请缩短台词，确认后手动重新生成；原视频已保留')
     target = folder / (stem + '-sound.mp4')
-    providers.render(store.asset(pid, s['clip']), lines, folder, target, duration_seconds=duration_seconds)
+    providers.render(store.asset(pid, s['clip']), lines, folder, target, duration_seconds=duration_seconds, **generation_options(p))
     versions = s.setdefault('rendered_versions', [])
     for name in (s.get('rendered'), target.name):
         if name and name not in versions:
@@ -380,11 +406,17 @@ def run_job(jid, pid, user, action, sid, preset=None):
         if action == 'settings':
             p['creative_draft'] = call(user, 'text', pid, lambda: providers.extract_settings(p['script'] + '\n项目背景规则：' + background_context(p, include_references=True)))
         elif action == 'split':
-            script = p['script'] + '\n项目背景规则：' + background_context(p)
+            script = p['script'] + '\n项目背景规则：' + background_context(p) + '\n' + NARRATION_RULE
             if p.get('creative_settings'):
                 script += '\n已确认设定（角色ID、场景scene_id、道具prop_ids必须使用这些编号，不另造设定）：' + json.dumps(p['creative_settings'], ensure_ascii=False)
             script += PLANNING_MARKER + planning_context(p)
-            data = call(user, 'text', pid, lambda: providers.split(script))
+            options = {'settings': p['creative_settings']} if p.get('creative_settings') else {}
+            if p.get('project_type') == 'heritage':
+                from scenarios.heritage_study.timing import timing_for
+                options['planning'] = dict(kind='heritage-history',duration_seconds=timing_for(p)['intro'],narration=p['script'])
+            data = call(user, 'text', pid, lambda: providers.split(script, **options))
+            if p.get('project_type') == 'heritage':
+                data['heritage_story_source'] = p['script']
             if p.get('creative_settings'):
                 data['characters'] = p['creative_settings']['characters']
                 for item in data['shots']:
@@ -396,6 +428,7 @@ def run_job(jid, pid, user, action, sid, preset=None):
                 p['storyboard_draft'] = data
             else:
                 p.update(data)
+                if p.get('project_type') == 'heritage': p['heritage_story_stale']=False
                 p['storyboard_confirmed'] = False
         elif action in {'image', 'reference'}:
             first = p['shots'][0]['id'] == sid
@@ -419,7 +452,7 @@ def run_job(jid, pid, user, action, sid, preset=None):
             prompt = frame_prompt(prompt_project, s)
             prompt, refs = with_style_reference(prompt_project, prompt, refs, asset_group='frames')
             prompt, refs = with_spatial_reference(p, s, prompt, refs, store)
-            generated = call(user, 'image', pid, lambda: providers.image(prompt, refs, folder, pid))
+            generated = call_image(user, pid, prompt, refs, folder)
             target = folder / (stem + '.png')
             with Image.open(generated) as image:
                 image.convert('RGB').save(target)
@@ -476,12 +509,7 @@ def run_job(jid, pid, user, action, sid, preset=None):
                 motion = '从输入图的实际状态开始，只执行以下动作：\n' + motion
             motion += '\n' + spatial_prompt(p, s, video=True)
             if video_model(mode).startswith('wan2.7'):
-                names = {c['id']: c['name'] for c in p['characters']}
-                if s['dialogues']:
-                    motion += '\n同期对白：按以下原文生成说话声音与对应人物口型，动作与声音同步，不另加旁白：\n' + '\n'.join(
-                        names.get(d['character_id'], '角色') + '说：“' + d['text'] + '”' for d in s['dialogues'])
-                else:
-                    motion += '\n本镜无台词，不添加说话或旁白。'
+                motion += '\n' + native_dialogue_prompt(p['characters'], s['dialogues'])
             call(user, 'video', pid, lambda: providers.video(store.asset(pid, s['image']), motion, target, project=p, duration_seconds=duration_seconds, **({'mode': mode, 'last_image': last_image, 'references': references} if mode != 'first_frame' else {})))
             actual = providers.duration(target)
             if abs(actual - duration_seconds) > 0.3:
@@ -512,8 +540,8 @@ def run_job(jid, pid, user, action, sid, preset=None):
             if not 1 <= len(clips) <= 6:
                 raise UserError('请完成1—6个片段')
             target = folder / (stem + '-final.mp4')
-            providers.assemble(clips, store.asset(pid, p['music']) if p.get('music') else None, folder, target)
-            p.update(final=target.name, final_stale=False)
+            providers.assemble(clips, store.asset(pid, p['music']) if p.get('music') else None, folder, target, **generation_options(p))
+            p.update(final=target.name, final_stale=False, final_media_format=format_for(p))
             p['final_versions'].append(target.name)
         store.save(p)
         store.event(pid, user['id'], action, {'shot': sid})
@@ -730,7 +758,7 @@ def add_shot(pid: str, body: ShotInput, user=Depends(identity)):
             raise UserError('道具不能重复')
         if not set(data['character_ids']) <= {c['id'] for c in p['characters']}:
             raise UserError('角色 ID 无效')
-        if any(d['character_id'] not in data['character_ids'] for d in data['dialogues']):
+        if invalid_speakers(data):
             raise UserError('台词角色必须在本镜头出场')
         if p.get('creative_settings'):
             check_references(p['creative_settings'], data)
@@ -769,7 +797,7 @@ def edit_shot(pid: str, sid: str, body: ShotInput, user=Depends(identity)):
         data = body.model_dump()
         if not set(data['character_ids']) <= {c['id'] for c in p['characters']}:
             raise UserError('角色 ID 无效')
-        if any(d['character_id'] not in data['character_ids'] for d in data['dialogues']):
+        if invalid_speakers(data):
             raise UserError('台词角色必须在本镜头出场')
         if p.get('creative_settings'):
             check_references(p['creative_settings'], data)
@@ -1059,8 +1087,8 @@ class VoiceChoice(BaseModel):
 def select_voices(pid: str, body: VoiceChoice, user=Depends(identity)):
     p = access(pid, user, True)
     known = {c['id'] for c in p['characters']}
-    if set(body.voices) != known or not set(body.voices.values()) <= set(VOICES.values()):
-        raise HTTPException(422, '请为每个角色选择支持的预设音色')
+    if not known <= set(body.voices) <= known | {NARRATOR} or not set(body.voices.values()) <= set(VOICES.values()):
+        raise HTTPException(422, '请为角色和旁白选择支持的预设音色')
     old = p.get('voices', VOICES)
     changed = {cid for cid, voice in body.voices.items() if old.get(cid) != voice}
     p['voices'] = body.voices
@@ -1144,7 +1172,7 @@ def run_preview(jid, pid, user, sid, request, stamp):
             prompt, refs = with_spatial_reference(p, draft, prompt, refs, store)
         if request['mode'] != 'redesign':
             prompt += '\n' + spatial_prompt(p, draft)
-        generated = call(user, 'image', pid, lambda: providers.image(prompt, refs, store.folder(pid), pid))
+        generated = call_image(user, pid, prompt, refs, store.folder(pid))
         change_warning = restyle_change_warning(store.asset(pid, s['image']), generated) if request['mode'] == 'style' else None
         name = uuid.uuid4().hex + '.png'
         with Image.open(generated) as img:
@@ -1186,7 +1214,7 @@ def preview_image(pid: str, sid: str, body: PreviewInput, user=Depends(identity)
         except ValueError as exc: raise HTTPException(422, str(exc)) from exc
     if not set(draft['character_ids']) <= {c['id'] for c in p['characters']}:
         raise HTTPException(422, '出场人物无效')
-    if any(d['character_id'] not in draft['character_ids'] for d in draft['dialogues']):
+    if invalid_speakers(draft):
         raise HTTPException(422, '台词角色必须在本镜头出场')
     if body.mode == 'detail':
         if not s.get('image') or not body.instruction.strip():
@@ -1286,19 +1314,19 @@ def undo_image(pid: str, sid: str, user=Depends(identity)):
 
 
 @router.get('/projects/{pid}/shots/{sid}/history')
-def get_image_history(pid: str, sid: str, user=Depends(identity)):
+def get_image_history(pid: str, sid: str, include_deleted: bool = False, user=Depends(identity)):
     p = access(pid, user)
-    return {'images': image_history(p, shot_at(p, sid))}
+    return {'images': image_history(p, shot_at(p, sid), include_deleted)}
 
 
 @router.get('/projects/{pid}/shots/{sid}/video-history')
-def get_video_history(pid: str, sid: str, user=Depends(identity)):
+def get_video_history(pid: str, sid: str, include_deleted: bool = False, user=Depends(identity)):
     p = access(pid, user)
     try:
         shot = shot_at(p, sid)
     except UserError as exc:
         raise HTTPException(404, str(exc)) from exc
-    return {'videos': video_history(p, shot)}
+    return {'videos': video_history(p, shot, include_deleted)}
 
 
 class AdoptVideo(BaseModel):
@@ -1437,6 +1465,8 @@ def choose_storyboard_draft(pid: str, choice: str, user=Depends(identity)):
     if not draft:
         raise HTTPException(409, '没有待确认的分镜草稿')
     if choice == 'adopt':
+        if p.get('project_type') == 'heritage' and (p.get('heritage_story_stale') or draft.get('heritage_story_source') is not None) and draft.get('heritage_story_source') != p['script']:
+            raise HTTPException(409, '历史脚本已更新，请根据当前旁白重新生成分镜')
         if p.get('creative_settings'):
             try:
                 for shot in draft['shots']: check_references(p['creative_settings'], shot)
@@ -1446,6 +1476,7 @@ def choose_storyboard_draft(pid: str, choice: str, user=Depends(identity)):
             'shots': p['shots'], 'characters': p['characters'],
             'deleted_shots': p.get('deleted_shots', []), 'final': p.get('final')})
         p.update(draft)
+        if p.get('project_type') == 'heritage': p['heritage_story_stale']=False
         # New IDs cannot collide with archived shots or their pending edits.
         for shot in p['shots']: shot['id'] = 's' + uuid.uuid4().hex
         p['deleted_shots'] = []
@@ -1502,7 +1533,11 @@ def run_setting_image(jid, pid, user, data, group, asset_id, redesign=False, vie
     try:
         p = store.load(pid)
         item = next(x for x in data[group] if x['id'] == asset_id)
+        from scenarios.heritage_study.visual_reference import reference_plan, prepare_reference
+        heritage_plan = reference_plan(p, group, item)
         purpose = {'characters':'单个人物全身设定图，清楚展示脸部和发型；衣纹详略由所选画风决定，不要求全身精细描线。空白浅色背景，不添加其他人物，不额外安排手持器物，仅在人物描述明确要求时画该道具。只绘人物，不制作图鉴、服饰说明页或带标题的海报', 'scenes':'无人空场景设定图，只展示建筑、自然环境、光线和空间布局。人物数量为零；不画人物、手脚、剪影、人影或人物倒影，不表现递伞等剧情动作。描述中即使涉及人物活动也仅提取空间环境。留出之后放置角色的空间', 'props':'单个道具设定图，独立展示形状、材质和颜色，背景留白。人物数量为零，不画手持道具的手、人体局部、人物、剪影或人物倒影，不添加建筑和山水背景'}[group]
+        if heritage_plan and group == 'props':
+            purpose = '古建筑目标构件的水墨设定图，保留实拍可见形制与连接关系，背景简洁留白。人物数量为零，不画人物、手或人物倒影，不编造隐藏结构。'
         if group == 'characters' and view == 'sheet':
             purpose = '同一角色的正面、侧面、背面三视图设定图，浅色空白背景，无文字无印章，不添加其他角色或剧情动作。'
         prompt = background_context(p)+'\n'+image_style({'creative_settings': data})+'\n'+purpose+'\n'+item['name']+'：'+item['desc']+'\n避免：'+negative_style({'creative_settings': data})
@@ -1534,14 +1569,21 @@ def run_setting_image(jid, pid, user, data, group, asset_id, redesign=False, vie
                 refs = [str(store.asset(pid, item['image']))]
                 angle = '严格侧面全身，面部与身体均旋转90度' if view == 'side' else '严格背面全身，背对观众，不回头，不显示正面五官'
                 prompt = background_context(p) + '\n' + image_style({'creative_settings': data}) + '\n' + item['desc'] + '\n' + angle + '。第1张是已选正面标准图，绘制同一人物的另一个视角。保持身材比例、发型头饰、服装版型、主色、腰带与鞋子一致，不换人不换装。空白背景，单人单幅，无文字，无多视图拼贴。\n避免：' + negative_style({'creative_settings': data})
-        prompt, refs = with_style_reference({'creative_settings': data}, prompt, refs, asset_group=group)
-        generated = call(user,'image',pid,lambda:providers.image(prompt,refs,store.folder(pid),pid, **({'ratio': '16:9'} if group == 'characters' and view == 'sheet' else {})))
+        heritage_reference = None
+        if heritage_plan:
+            instruction, refs, heritage_reference = prepare_reference(p, store, heritage_plan)
+            # Subject-bearing style samples can override a real architectural target.
+            # Here the real photo controls form and image_style controls brushwork.
+            prompt = instruction + '\n' + prompt
+        else:
+            prompt, refs = with_style_reference({'creative_settings': data}, prompt, refs, asset_group=group)
+        generated = call_image(user, pid, prompt, refs, store.folder(pid), **({'ratio': '16:9'} if group == 'characters' and view == 'sheet' else {}))
         name = uuid.uuid4().hex+'.png'
         with Image.open(generated) as img: img.convert('RGB').save(store.folder(pid)/name)
         remember_settings(p, p.get('creative_settings'))
         remember_settings(p, p.get('creative_draft'))
         remember_setting_image(p, group, item, data['style'])
-        p.setdefault('setting_generation_records', {})[name] = {'style': data['style'], 'prompt': prompt, 'references': [str(ref).replace('\\', '/').rsplit('/', 1)[-1] for ref in refs], 'group': group, 'asset_id': asset_id, 'identity_source': source_name, 'reference_mode': 'portrait' if crop_path is not None else 'full' if source_name else 'text'}
+        p.setdefault('setting_generation_records', {})[name] = {'style': data['style'], 'prompt': prompt, 'references': [str(ref).replace('\\', '/').rsplit('/', 1)[-1] for ref in refs], 'group': group, 'asset_id': asset_id, 'identity_source': source_name, 'reference_mode': 'heritage-photo' if heritage_reference else 'portrait' if crop_path is not None else 'full' if source_name else 'text', **({'heritage_reference': heritage_reference} if heritage_reference else {})}
         if group == 'characters' and view in ('side', 'back'):
             item.setdefault('views', {})[view] = {'image': name, 'source': item['image'], 'style': data['style'], 'description': item['desc']}
         else:
@@ -1625,10 +1667,10 @@ def local_reference_library(user=Depends(identity)):
 
 
 @router.get('/projects/{pid}/setting-history/{group}/{asset_id}')
-def setting_history(pid: str, group: Literal['characters','scenes','props'], asset_id: str, user=Depends(identity)):
+def setting_history(pid: str, group: Literal['characters','scenes','props'], asset_id: str, include_deleted: bool = False, user=Depends(identity)):
     p = access(pid, user)
     return {'items': [{**item, 'image_url': f'/api/ink/projects/{pid}/assets/{item["image"]}'}
-                      for item in setting_versions(p, group, asset_id)
+                      for item in setting_versions(p, group, asset_id, include_deleted)
                       if store.asset(pid, item['image']).is_file()]}
 
 
@@ -1666,3 +1708,6 @@ install_video_editing(_sys.modules[__name__])
 
 from scenarios.heritage_study.api import install as install_heritage
 install_heritage(_sys.modules[__name__])
+
+from .history_retention import install as install_history_retention
+install_history_retention(_sys.modules[__name__])

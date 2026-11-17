@@ -35,7 +35,7 @@ export function storyboardImageStatus(shot: Shot): string {
 export function reconcileShotFields(project: Project, shot: ShotFields): ShotFields {
   const result = shotFields(shot);
   result.character_ids = result.character_ids.filter(id => project.characters.some(item => item.id === id));
-  result.dialogues = result.dialogues.filter(line => result.character_ids.includes(line.character_id));
+  result.dialogues = result.dialogues.filter(line => line.character_id === 'narrator' || result.character_ids.includes(line.character_id));
   if (project.creative_settings) {
     result.prop_ids = result.prop_ids!.filter(id => project.creative_settings!.props.some(item => item.id === id));
     if (!project.creative_settings.scenes.some(item => item.id === result.scene_id)) result.scene_id = null;

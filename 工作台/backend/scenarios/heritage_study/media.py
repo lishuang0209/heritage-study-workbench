@@ -1,4 +1,4 @@
-"""One photo transform is shared by portrait previews, movie tails and A4 cards."""
+"""One landscape photo transform is shared by previews, movie tails and A4 cards."""
 import math
 from pathlib import Path
 
@@ -7,6 +7,8 @@ from scenarios.ink_drama.domain import UserError
 from scenarios.ink_drama.providers import checked_ffmpeg
 from .domain import crop_bounds, observation_guidance
 from .timing import timing_for, observation_slots
+
+SIZE = (1280, 720)
 
 FONT_PATHS = ['/System/Library/Fonts/Supplemental/Songti.ttc',
               '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
@@ -46,15 +48,16 @@ def annotated_photo(store, pid, photo):
     with Image.open(store.asset(pid,photo['image'])) as source:
         original = ImageOps.exif_transpose(source).convert('RGB')
     width,height = original.size
-    canvas = Image.new('RGB',(720,960),'#f1eee7')
+    canvas = Image.new('RGB',SIZE,'#f1eee7')
+    output_width,output_height=SIZE
     x,y,w,h = crop_bounds(width,height,photo)
     if photo['mode']=='cover':
         crop=original.crop((round(x*width),round(y*height),round((x+w)*width),round((y+h)*height)))
-        resized=crop.resize((720,960),Image.Resampling.LANCZOS)
-        canvas.paste(resized,(0,0)); ox=oy=0; sx=720/w;sy=960/h
+        resized=crop.resize(SIZE,Image.Resampling.LANCZOS)
+        canvas.paste(resized,(0,0)); ox=oy=0; sx=output_width/w;sy=output_height/h
     else:
-        factor=min(720/width,960/height); rw,rh=round(width*factor),round(height*factor)
-        ox,oy=(720-rw)/2,(960-rh)/2;sx,sy=rw,rh
+        factor=min(output_width/width,output_height/height); rw,rh=round(width*factor),round(height*factor)
+        ox,oy=(output_width-rw)/2,(output_height-rh)/2;sx,sy=rw,rh
         canvas.paste(original.resize((rw,rh),Image.Resampling.LANCZOS),(round(ox),round(oy)))
     mark=photo.get('mark')
     if mark:
@@ -78,11 +81,11 @@ def credit(photo):
 
 def photo_frame(store,pid,station,slot,text):
     photo=station[slot]
-    canvas=Image.new('RGB',(720,1280),'#faf8f2');draw=ImageDraw.Draw(canvas)
-    block(draw,station['building']+' · '+station['name'],(26,14,668,94),32)
-    canvas.paste(annotated_photo(store,pid,photo).resize((630,840)),(45,110))
-    block(draw,text,(30,962,660,222),28)
-    block(draw,credit(photo),(30,1190,660,80),15)
+    canvas=Image.new('RGB',SIZE,'#faf8f2');draw=ImageDraw.Draw(canvas)
+    block(draw,station['building']+' · '+station['name'],(28,20,1224,72),36)
+    canvas.paste(annotated_photo(store,pid,photo).resize((832,468)),(28,108))
+    block(draw,text,(888,108,364,468),32)
+    block(draw,credit(photo),(28,602,1224,100),18)
     return canvas
 
 
@@ -91,9 +94,9 @@ def task_card(store,pid,station,target):
     block(draw,'古建观察任务卡',(65,42,1110,70),50)
     block(draw,station['building']+' · '+station['name'],(65,120,1110,100),42)
     block(draw,'适用年级：'+station['grade']+'    目标构件：'+station['component'],(65,218,1110,66),27)
-    page.paste(annotated_photo(store,pid,station['panorama']).resize((645,860)),(297,292))
-    block(draw,'观察指引\n'+observation_guidance(station),(65,1172,1110,280),32)
-    block(draw,'观察问题\n'+station['question'],(65,1462,1110,128),32)
+    page.paste(annotated_photo(store,pid,station['panorama']).resize((1110,624)),(65,292))
+    block(draw,'观察指引\n'+observation_guidance(station),(65,952,1110,350),36)
+    block(draw,'观察问题\n'+station['question'],(65,1340,1110,210),36)
     credits=credit(station['panorama'])
     if station.get('detail'):credits+='\n特写'+credit(station['detail'])
     block(draw,credits,(65,1600,1110,137),18)
@@ -102,6 +105,8 @@ def task_card(store,pid,station,target):
 
 
 def export_video(api,p,station,script,folder,target):
+    if p.get('heritage_story_stale'):
+        raise UserError('历史旁白已更新，旧镜头已保留；请重新生成并采用分镜后再导出短片')
     timing=timing_for(p);intro_seconds=timing['intro'];total=sum(timing.values())
     ready=[]
     for shot in p['shots']:
@@ -112,10 +117,10 @@ def export_video(api,p,station,script,folder,target):
     lengths=[api.providers.duration(path) for path in ready]
     if sum(lengths)>intro_seconds+.05: raise UserError(f'历史引入镜头需不超过{intro_seconds}秒，请减少镜头或调整时长；不会自动截掉对白')
     storybase=folder/(target.stem+'-story-base.mp4')
-    api.providers.assemble(ready,None,folder,storybase)
-    overlay=Image.new('RGBA',(720,1280),(0,0,0,0));draw=ImageDraw.Draw(overlay)
-    draw.rectangle((0,1000,720,1280),fill=(250,248,242,245))
-    block(draw,script['intro'],(30,1020,660,240),29)
+    api.providers.assemble(ready,None,folder,storybase,ratio='16:9')
+    overlay=Image.new('RGBA',SIZE,(0,0,0,0));draw=ImageDraw.Draw(overlay)
+    draw.rectangle((0,540,1280,720),fill=(250,248,242,245))
+    block(draw,script['intro'],(40,558,1200,150),30)
     overlay_path=folder/(target.stem+'-story-text.png');overlay.save(overlay_path)
     story=folder/(target.stem+'-story.mp4')
     checked_ffmpeg(['-i',str(storybase),'-i',str(overlay_path),'-filter_complex',
@@ -135,7 +140,7 @@ def export_video(api,p,station,script,folder,target):
             '-t',str(duration),'-c:v','libx264','-preset','veryfast','-tune','stillimage',
             '-pix_fmt','yuv420p','-r','30','-c:a','aac','-shortest',str(clip)])
         segments.append(clip);chapters.append(dict(kind=slot,duration=duration,video=clip.name))
-    api.providers.assemble(segments,None,folder,target)
+    api.providers.assemble(segments,None,folder,target,ratio='16:9')
     if abs(api.providers.duration(target)-total)>.15:raise UserError('研学成片时长校验失败，旧导出已保留')
     return chapters
 

@@ -31,6 +31,10 @@ def example_caption():
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
+    from config import Config
+    # Generation is mocked in these tests; make preflight credentials deterministic.
+    for name in ('ARK_API_KEY', 'DASHSCOPE_API_KEY', 'OPENAI_API_KEY'):
+        monkeypatch.setattr(Config, name, 'test-image-key')
     store = Store(tmp_path)
     monkeypatch.setenv('SFA_INK_TRIAL_MODE', '1')
     monkeypatch.setattr(api, 'store', store)
@@ -808,8 +812,9 @@ def test_split_uses_confirmed_settings_and_retains_reference_ids(setup,monkeypat
     assert client.put(base+'/creative-settings',json=creative_fixture()).status_code==200
     class Immediate:
         def submit(self,fn,*args):fn(*args)
-    def split(script):
+    def split(script, *, settings=None):
         assert 'prop1' in script and '竹骨黄纸伞' in script
+        assert settings['props'][0]['id']=='prop1'
         data=example_board()
         for s in data['shots']:s.update(scene_id='scene1',prop_ids=['prop1'])
         return data

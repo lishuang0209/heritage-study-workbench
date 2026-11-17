@@ -101,16 +101,16 @@ def test_task_edits_invalidate_exports_and_script_review(setup):
 def test_crop_protection_and_scaled_arrow_preview(setup):
     _,client=setup;p=prepared(setup);station=p['heritage_station'];photo=station['panorama']
     photo.update(mode='cover',mark={'kind':'arrow','x':.2,'y':.02,'x2':.3,'y2':.06})
-    # A landscape image's central portrait crop cannot contain this corner target.
+    # A portrait image's central landscape crop cannot contain this corner target.
     base=f"/api/ink/projects/{p['id']}"
-    p=client.post(base+'/heritage/photos/panorama',params={'version':p['heritage_version']},files={'file':('landscape.jpg',picture(size=(1600,900)),'image/jpeg')}).json()
+    p=client.post(base+'/heritage/photos/panorama',params={'version':p['heritage_version']},files={'file':('landscape.jpg',picture(size=(900,1600)),'image/jpeg')}).json()
     station['panorama']['image']=p['heritage_station']['panorama']['image'];station['panorama'].update(source='test',author='teacher',license='test')
     p=save(client,p,station)
     r=client.post(base+'/heritage/confirm',json={'version':p['heritage_version'],'teacher_verified':True})
     assert r.status_code==422 and '裁切' in r.json()['detail']
     station['panorama']['mode']='contain';p=save(client,p,station)
     r=client.get(p['heritage_station']['panorama']['preview_url'])
-    assert r.status_code==200 and Image.open(io.BytesIO(r.content)).size==(720,1280)
+    assert r.status_code==200 and Image.open(io.BytesIO(r.content)).size==(1280,720)
     assert client.post(base+'/heritage/confirm',json={'version':p['heritage_version'],'teacher_verified':False}).status_code==422
 
 
@@ -155,9 +155,9 @@ def test_card_is_one_a4_page_and_uses_same_annotation_geometry(setup,tmp_path):
     reader=PdfReader(str(target));assert len(reader.pages)==1
     box=reader.pages[0].mediabox;assert abs(float(box.width)-595.2)<1 and abs(float(box.height)-841.92)<1
     photo=annotated_photo(store,p['id'],station['panorama'])
-    # The mark is at normalized x=.2,y=.2 on a 3:4 image (720x960 output).
-    assert photo.getpixel((144,192))[0]>100
-    assert photo.getpixel((144,192))[1]<100
+    # A 3:4 photo is contained in 1280x720 without stretching: x=370+.2*540, y=.2*720.
+    assert photo.getpixel((478,144))[0]>100
+    assert photo.getpixel((478,144))[1]<100
 
 
 def test_export_success_failure_retains_previous_files_and_human_trial_numbers(setup,monkeypatch):
@@ -215,8 +215,10 @@ def test_real_detail_movie_goes_from_panorama_to_same_target_detail(setup,tmp_pa
     chapters=export_video(facade,p,clean(p['heritage_station']),p['heritage_script'],tmp_path,target)
     assert [(x['kind'],x['duration']) for x in chapters]==[('story',12),('panorama',6),('detail',5),('task',7)]
     assert abs(Providers().duration(target)-30)<.1
+    from test_heritage_widescreen import media_size
+    assert media_size(target)==(1280,720) and Providers().has_audio(target)
     for time,color in ((.5,(255,0,0)),(12.5,(0,128,0)),(18.5,(0,0,255)),(23.5,(0,0,255))):
-        pixel=subprocess.check_output([ffmpeg_executable(),'-v','error','-ss',str(time),'-i',str(target),'-frames:v','1','-vf','crop=1:1:400:600,format=rgb24','-f','rawvideo','pipe:1'])
+        pixel=subprocess.check_output([ffmpeg_executable(),'-v','error','-ss',str(time),'-i',str(target),'-frames:v','1','-vf','crop=1:1:520:300,format=rgb24','-f','rawvideo','pipe:1'])
         assert max(abs(a-b) for a,b in zip(pixel,color))<20
     card=tmp_path/f'{case_index}-card.pdf';task_card(store,p['id'],clean(p['heritage_station']),card)
     assert len(PdfReader(str(card)).pages)==1
@@ -441,7 +443,7 @@ def test_detail_generation_guards_missing_marks_versions_readonly_and_credits_fo
 @pytest.mark.parametrize('index',[0,1,2])
 def test_history_templates_introduce_place_before_observation_without_source_notes(setup,index):
     _,client=setup;p=prepared(setup,case_index=index);script=p['heritage_script'];case=CASES[index]
-    assert script['intro']==case['intro'] and len(script['intro'])<70
+    assert len(script['intro'])<100 and '寻找' in script['intro']
     assert any(term in script['intro'] for term in ('北宋','宋代','明清'))
     assert case['station']['question'] in script['task']
     assert 'http' not in ''.join(script[key] for key in ('intro','location','task'))
