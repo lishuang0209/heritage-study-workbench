@@ -5,7 +5,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from scenarios.ink_drama.domain import UserError
 from scenarios.ink_drama.providers import checked_ffmpeg
-from .domain import crop_bounds
+from .domain import crop_bounds, observation_guidance
+from .timing import timing_for, observation_slots
 
 FONT_PATHS = ['/System/Library/Fonts/Supplemental/Songti.ttc',
               '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
@@ -91,9 +92,8 @@ def task_card(store,pid,station,target):
     block(draw,station['building']+' · '+station['name'],(65,120,1110,100),42)
     block(draw,'适用年级：'+station['grade']+'    目标构件：'+station['component'],(65,218,1110,66),27)
     page.paste(annotated_photo(store,pid,station['panorama']).resize((645,860)),(297,292))
-    block(draw,'寻找指令\n'+station['instruction'],(65,1172,1110,180),32)
-    block(draw,'观察问题\n'+station['question'],(65,1360,1110,135),32)
-    block(draw,'观察站位：'+station['standing_position'],(65,1505,1110,85),22)
+    block(draw,'观察指引\n'+observation_guidance(station),(65,1172,1110,280),32)
+    block(draw,'观察问题\n'+station['question'],(65,1462,1110,128),32)
     credits=credit(station['panorama'])
     if station.get('detail'):credits+='\n特写'+credit(station['detail'])
     block(draw,credits,(65,1600,1110,137),18)
@@ -102,6 +102,7 @@ def task_card(store,pid,station,target):
 
 
 def export_video(api,p,station,script,folder,target):
+    timing=timing_for(p);intro_seconds=timing['intro'];total=sum(timing.values())
     ready=[]
     for shot in p['shots']:
         if not shot.get('rendered') or any(shot.get(k) for k in ('image_stale','clip_stale','rendered_stale')):
@@ -109,7 +110,7 @@ def export_video(api,p,station,script,folder,target):
         ready.append(api.store.asset(p['id'],shot['rendered']))
     if not ready: raise UserError('请先制作水墨故事片段，或导入已有水墨镜头')
     lengths=[api.providers.duration(path) for path in ready]
-    if sum(round(d) for d in lengths)>12: raise UserError('水墨故事段需不超过12秒，请减少镜头或缩短时长；不会自动截掉对白')
+    if sum(lengths)>intro_seconds+.05: raise UserError(f'历史引入镜头需不超过{intro_seconds}秒，请减少镜头或调整时长；不会自动截掉对白')
     storybase=folder/(target.stem+'-story-base.mp4')
     api.providers.assemble(ready,None,folder,storybase)
     overlay=Image.new('RGBA',(720,1280),(0,0,0,0));draw=ImageDraw.Draw(overlay)
@@ -118,15 +119,15 @@ def export_video(api,p,station,script,folder,target):
     overlay_path=folder/(target.stem+'-story-text.png');overlay.save(overlay_path)
     story=folder/(target.stem+'-story.mp4')
     checked_ffmpeg(['-i',str(storybase),'-i',str(overlay_path),'-filter_complex',
-        '[0:v]tpad=stop_mode=clone:stop_duration=12,trim=duration=12,setpts=PTS-STARTPTS[v];[v][1:v]overlay=0:0[out]',
-        '-map','[out]','-map','0:a:0','-af','apad,atrim=duration=12','-t','12',
+        f'[0:v]tpad=stop_mode=clone:stop_duration={intro_seconds},trim=duration={intro_seconds},setpts=PTS-STARTPTS[v];[v][1:v]overlay=0:0[out]',
+        '-map','[out]','-map','0:a:0','-af',f'apad,atrim=duration={intro_seconds}','-t',str(intro_seconds),
         '-c:v','libx264','-preset','veryfast','-crf','18','-pix_fmt','yuv420p','-r','30','-c:a','aac',str(story)])
-    chapters=[dict(kind='story',duration=12,video=story.name)]
-    slots=[('panorama',6),('detail',5)] if station.get('detail') else [('panorama',11)]
+    chapters=[dict(kind='story',duration=intro_seconds,video=story.name)]
+    slots=observation_slots(timing['location'],bool(station.get('detail')))
     segments=[story]
-    for slot,duration in slots+[('task',7)]:
+    for slot,duration in slots+[('task',timing['task'])]:
         key='detail' if slot=='task' and station.get('detail') else 'panorama' if slot=='task' else slot
-        text=station['instruction']+'\n'+station['question'] if slot=='task' else script['location']
+        text=observation_guidance(station)+'\n'+station['question'] if slot=='task' else script['location']
         frame=folder/(target.stem+'-'+slot+'.png')
         photo_frame(api.store,p['id'],station,key,text).save(frame)
         clip=frame.with_suffix('.mp4')
@@ -135,23 +136,24 @@ def export_video(api,p,station,script,folder,target):
             '-pix_fmt','yuv420p','-r','30','-c:a','aac','-shortest',str(clip)])
         segments.append(clip);chapters.append(dict(kind=slot,duration=duration,video=clip.name))
     api.providers.assemble(segments,None,folder,target)
-    if abs(api.providers.duration(target)-30)>.15:raise UserError('研学成片时长校验失败，旧导出已保留')
+    if abs(api.providers.duration(target)-total)>.15:raise UserError('研学成片时长校验失败，旧导出已保留')
     return chapters
 
 
 def add_voiceover(api,p,script,target,user):
     """Explicit optional online TTS; never truncates a teacher's spoken text."""
+    timing=timing_for(p);total=sum(timing.values())
     inputs,filters=[],[]
-    for i,(key,duration) in enumerate((('intro',12),('location',11),('task',7))):
+    for i,(key,duration) in enumerate(timing.items()):
         voice=target.with_name(target.stem+f'-voice-{key}.mp3')
         api.call(user,'speech',p['id'],lambda key=key,voice=voice:api.providers.speak(script[key],'zh-CN-XiaoxiaoNeural',voice))
         if api.providers.duration(voice)>duration+.05:
-            raise UserError(f'{ {"intro":"故事引入","location":"实拍定位","task":"现场任务"}[key]}配音超过{duration}秒，请缩短对应台词后重试；原导出保留')
+            raise UserError(f'{ {"intro":"历史引入","location":"实物观察","task":"现场任务"}[key]}配音超过{duration}秒，请延长该段时长或缩短台词后重试；原导出保留')
         inputs+=['-i',str(voice)]
         filters.append(f'[{i}:a:0]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=duration={duration},asetpts=PTS-STARTPTS[a{i}]')
     audio=target.with_name(target.stem+'-narration.m4a')
     filters.append('[a0][a1][a2]concat=n=3:v=0:a=1[out]')
     checked_ffmpeg([*inputs,'-filter_complex',';'.join(filters),'-map','[out]','-c:a','aac',str(audio)])
     mux=target.with_name(target.stem+'-narrated.mp4')
-    checked_ffmpeg(['-i',str(target),'-i',str(audio),'-map','0:v:0','-map','1:a:0','-c:v','copy','-c:a','aac','-t','30','-movflags','+faststart',str(mux)])
+    checked_ffmpeg(['-i',str(target),'-i',str(audio),'-map','0:v:0','-map','1:a:0','-c:v','copy','-c:a','aac','-t',str(total),'-movflags','+faststart',str(mux)])
     mux.replace(target)

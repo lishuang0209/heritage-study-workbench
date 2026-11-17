@@ -51,7 +51,15 @@ export default function InkPage() {
     return () => { active = false; window.clearInterval(timer); };
   }, [pid, busy, refresh]);
   const perform = async (fn: () => Promise<void>) => { setError(''); setWorking(true); try { await fn(); } catch (e) { setError(e instanceof Error ? e.message : '请求失败'); } finally { setWorking(false); } };
-  const open = async (id: string) => { setProject(await api<Project>(`/projects/${id}`)); };
+  const open = async (id: string) => {
+    let opened = await api<Project>(`/projects/${id}`);
+    const canEdit = !me?.trial_mode || (opened.owner === me.id && !me.ended);
+    if (opened.project_type === 'heritage' && canEdit && !opened.jobs.some(j => j.state === 'running') &&
+        [opened.heritage_station?.panorama, opened.heritage_station?.detail].some(photo => photo && (!photo.source.trim() || !photo.author.trim() || !photo.license.trim()))) {
+      opened = await api<Project>(`/projects/${id}/heritage/photo-credits`, json('POST', {version: opened.heritage_version || 0}));
+    }
+    setProject(opened);
+  };
   const action = async (name: string, sid?: string, preset?: string): Promise<Project> => {
     if (!project) throw new Error('请先打开项目');
     const params = new URLSearchParams();

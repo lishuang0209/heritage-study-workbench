@@ -31,7 +31,10 @@ class Photo(Strict):
     source: str = Field(default='', max_length=240)
     author: str = Field(default='', max_length=80)
     license: str = Field(default='', max_length=200)
+    credit_kind: Literal['manual', 'unresolved', 'catalog', 'self', 'authorized'] = 'manual'
     mark: Mark | None = None
+    derived_from: str | None = Field(default=None, max_length=100)
+    derived_mark: Mark | None = None
     mode: Literal['contain', 'cover'] = 'contain'
     focus_x: float = Field(default=.5, ge=0, le=1)
     focus_y: float = Field(default=.5, ge=0, le=1)
@@ -45,7 +48,7 @@ class Station(Strict):
     standing_position: str = Field(default='', max_length=300)
     checked_description: str = Field(default='', max_length=1500)
     objective: str = Field(default='', max_length=300)
-    instruction: str = Field(default='', max_length=220)
+    instruction: str = Field(default='', max_length=600)
     question: str = Field(default='', max_length=160)
     panorama: Photo | None = None
     detail: Photo | None = None
@@ -71,21 +74,52 @@ def crop_bounds(width, height, photo):
     return ((1-cw)*photo['focus_x'], (1-ch)*photo['focus_y'], cw, ch)
 
 
+def observation_guidance(station):
+    """Keep saved legacy positions visible in the unified instruction, without writes."""
+    position = station.get('standing_position', '').strip()
+    instruction = station.get('instruction', '').strip()
+    if not position or position in instruction: return instruction
+    if not instruction or instruction in position: return position
+    return position + ('' if position.endswith(('。','！','？','!','?','；',';')) else '。') + instruction
+
+
+def derived_detail_stale(station):
+    detail = station.get('detail') or {}
+    if not detail.get('derived_from'): return False
+    panorama = station.get('panorama') or {}
+    return detail['derived_from'] != panorama.get('image') or detail.get('derived_mark') != panorama.get('mark')
+
+
+def validate_detail_link(p):
+    station = p.get('heritage_station') or {}
+    detail = station.get('detail') or {}
+    record = p.get('heritage_uploads', {}).get(detail.get('image'), {})
+    if record.get('derived_from'):
+        if (detail.get('derived_from') != record['derived_from'] or
+                detail.get('derived_mark') != record['derived_mark'] or detail.get('mark') != record['mark']):
+            raise UserError('自动特写的关联信息或标注已变化，请从定位图重新生成特写')
+    elif detail.get('derived_from') or detail.get('derived_mark'):
+        raise UserError('特写关联信息无效，请重新生成或另传实拍照片')
+    if derived_detail_stale(station):
+        raise UserError('定位图或标注已变化，请更新特写，或移除特写后继续')
+
+
 def validate_ready(p, store):
     station = Station.model_validate(p.get('heritage_station') or {}).model_dump()
     labels = {'building':'建筑名称','name':'讲解站名称','component':'目标构件','grade':'适用年级',
-              'standing_position':'学生观察站位','checked_description':'已核对的构件说明',
-              'objective':'教学目标','instruction':'寻找指令','question':'观察问题'}
-    missing = [label for key,label in labels.items() if not station[key].strip()]
+              'checked_description':'研学资料',
+              'objective':'教学目标','instruction':'观察指引','question':'观察问题'}
+    missing = [label for key,label in labels.items() if not (observation_guidance(station) if key == 'instruction' else station[key].strip())]
     if not station['panorama']: missing.append('现场定位图')
     if missing: raise UserError('请补齐：'+'、'.join(missing))
+    validate_detail_link(p)
     from PIL import Image
     for slot, label in (('panorama','定位图'),('detail','构件特写')):
         photo = station[slot]
         if not photo: continue
         if not photo['mark']: raise UserError(label+'还没有有效标注')
         if not all(photo[k].strip() for k in ('source','author','license')):
-            raise UserError('请填写'+label+'的来源、作者和使用许可')
+            raise UserError('请为'+label+'选择照片来源，或使用已识别的素材')
         path = store.asset(p['id'], photo['image'])
         if not path.is_file(): raise UserError(label+'文件不存在，请重新上传')
         with Image.open(path) as image: bounds = crop_bounds(*image.size, photo)
@@ -98,8 +132,9 @@ def validate_ready(p, store):
 
 
 def snapshot(p):
+    timing = {'timing':p['heritage_timing'],'timing_version':p.get('heritage_timing_version',0)} if p.get('heritage_timing') else {}
     return hashlib.sha256(json.dumps({'version':p.get('heritage_version',0),
-        'station':p.get('heritage_station'), 'script':p.get('heritage_script'),
+        'station':p.get('heritage_station'), 'script':p.get('heritage_script'), **timing,
         'shots':[(s['id'],s.get('revision'),s.get('rendered')) for s in p['shots']]},
         sort_keys=True,ensure_ascii=False).encode()).hexdigest()
 
@@ -108,6 +143,9 @@ def decorate(p):
     p['project_type'] = p.get('project_type', 'ink')
     if p['project_type'] != 'heritage': return p
     current_stamp = snapshot(p)
+    from .timing import timing_for
+    p['heritage_timing']=timing_for(p)
+    p['heritage_timing_version']=p.get('heritage_timing_version',0)
     pid = p['id']; version = p.get('heritage_version',0)
     p['heritage_station'] = p.get('heritage_station') or empty_station()
     p['heritage_version'] = version

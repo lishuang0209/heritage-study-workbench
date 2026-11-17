@@ -11,9 +11,12 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import Field
 
 from scenarios.ink_drama.domain import UserError, ShotInput, parse_json
-from .domain import Strict, Station, Photo, empty_station, invalidate, validate_ready, snapshot
+from .domain import Strict, Station, Photo, empty_station, invalidate, validate_ready, snapshot, observation_guidance, validate_detail_link
 from .media import photo_frame, task_card, export_video
-from .templates import CASES, script_from_station
+from .templates import CASES, script_from_station, research_excerpt, HISTORY_PLACEHOLDER
+from .photo_credits import recognize, selected_credits, fill_existing
+from .detail_crop import crop_detail
+from .timing import Timing, timing_for
 
 
 class SaveStation(Strict):
@@ -21,7 +24,21 @@ class SaveStation(Strict):
     station: Station
 
 
+class CreditLookup(Strict):
+    version: int = Field(ge=0)
+
+
+class DetailFromMark(Strict):
+    version: int = Field(ge=0)
+
+
+class SaveTiming(Strict):
+    version: int = Field(ge=0)
+    timing: Timing
+
+
 class Confirm(Strict):
+    timing_version: int = Field(default=0,ge=0)
     version: int = Field(ge=0)
     teacher_verified: bool = False
     same_target_verified: bool = False
@@ -29,11 +46,12 @@ class Confirm(Strict):
 
 class Script(Strict):
     intro: str = Field(min_length=1,max_length=400)
-    location: str = Field(min_length=1,max_length=240)
-    task: str = Field(min_length=1,max_length=380)
+    location: str = Field(min_length=1,max_length=600)
+    task: str = Field(min_length=1,max_length=800)
 
 
 class SaveScript(Script):
+    timing_version: int = Field(default=0,ge=0)
     version: int = Field(ge=0)
     station_version: int = Field(ge=0)
 
@@ -45,6 +63,7 @@ class Reuse(Strict):
 
 
 class Export(Strict):
+    timing_version: int = Field(default=0,ge=0)
     kind: Literal['video','card','both'] = 'both'
     version: int = Field(ge=0)
     narration: bool = False
@@ -84,8 +103,19 @@ def install(api):
             if photo:
                 upload=p.get('heritage_uploads',{}).get(photo['image'])
                 if not upload or upload['slot']!=slot:raise HTTPException(422,'请先为此讲解站上传对应照片')
+                photo['derived_from']=upload.get('derived_from')
+                photo['derived_mark']=upload.get('derived_mark')
+                if upload.get('derived_from'):
+                    if photo['mark']!=upload['mark']:
+                        raise HTTPException(422,'自动特写的标注随定位图生成，请修改定位图后重新生成')
+                    photo.update(mode='contain',focus_x=.5,focus_y=.5)
+                credit=selected_credits(photo['credit_kind'])
+                if credit:photo.update(credit)
                 if not old.get(slot) or old[slot]['image']!=photo['image']:
-                    photo['mark']=None
+                    photo['mark']=upload['mark'] if upload.get('derived_from') else None
+        detail=data.get('detail');panorama=data.get('panorama')
+        if detail and panorama and detail.get('derived_from')==panorama['image']:
+            for key in ('source','author','license','credit_kind'):detail[key]=panorama[key]
         if data!=old:
             p['heritage_station']=data;invalidate(p);api.store.save(p)
         return api.public(p)
@@ -103,10 +133,34 @@ def install(api):
                     p=project(pid,user,True);check_version(p,version)
                     name=uuid.uuid4().hex+'.jpg';image.save(api.store.asset(pid,name),quality=94)
                     p.setdefault('heritage_uploads',{})[name]={'slot':slot,'width':image.width,'height':image.height}
-                    p.setdefault('heritage_station',empty_station())[slot]=Photo(image=name).model_dump()
+                    p.setdefault('heritage_station',empty_station())[slot]=Photo(image=name,**(recognize(data) or {'credit_kind':'unresolved'})).model_dump()
                     invalidate(p);api.store.save(p)
         except (UnidentifiedImageError,OSError,Image.DecompressionBombError) as exc:
             raise HTTPException(422,'无法读取照片，请上传有效的JPG、PNG或WEBP') from exc
+        return api.public(p)
+
+    @api.router.post('/projects/{pid}/heritage/detail-from-mark')
+    @api.serialized
+    def detail_from_mark(pid:str,body:DetailFromMark,user=Depends(api.identity)):
+        p=project(pid,user,True);check_version(p,body.version)
+        station=p.get('heritage_station') or empty_station();panorama=station.get('panorama')
+        if not panorama or not panorama.get('mark'):raise HTTPException(422,'请先上传定位图并标注目标')
+        source=api.store.asset(pid,panorama['image'])
+        if not source.is_file():raise HTTPException(422,'定位图不存在，请重新上传')
+        name=uuid.uuid4().hex+'.jpg';target=api.store.asset(pid,name)
+        geometry=safe(lambda:crop_detail(source,panorama['mark'],target))
+        credits={key:panorama.get(key,'manual' if key=='credit_kind' else '') for key in ('source','author','license','credit_kind')}
+        station['detail']=Photo(image=name,mark=geometry['mark'],derived_from=panorama['image'],derived_mark=panorama['mark'],**credits).model_dump()
+        p.setdefault('heritage_uploads',{})[name]={'slot':'detail',**geometry,'derived_from':panorama['image'],'derived_mark':copy.deepcopy(panorama['mark'])}
+        p['heritage_station']=station;invalidate(p);api.store.save(p)
+        return api.public(p)
+
+    @api.router.post('/projects/{pid}/heritage/photo-credits')
+    @api.serialized
+    def recover_photo_credits(pid:str,body:CreditLookup,user=Depends(api.identity)):
+        p=project(pid,user,True);check_version(p,body.version)
+        if fill_existing(api.store,p):
+            invalidate(p);api.store.save(p)
         return api.public(p)
 
     @api.router.get('/projects/{pid}/heritage/photos/{slot}/preview')
@@ -114,7 +168,8 @@ def install(api):
         p=project(pid,user);station=p.get('heritage_station') or empty_station()
         if not station.get(slot):raise HTTPException(404,'请先上传照片')
         def render():
-            image=photo_frame(api.store,pid,station,slot,station['instruction']+'\n'+station['question'])
+            if slot=='detail':validate_detail_link(p)
+            image=photo_frame(api.store,pid,station,slot,observation_guidance(station)+'\n'+station['question'])
             out=io.BytesIO();image.save(out,'PNG');return out.getvalue()
         return Response(safe(render),media_type='image/png',headers={'Cache-Control':'no-store'})
 
@@ -123,16 +178,31 @@ def install(api):
     def confirm(pid:str,body:Confirm,user=Depends(api.identity)):
         p=project(pid,user,True);check_version(p,body.version)
         safe(lambda:validate_ready(p,api.store))
-        if not body.teacher_verified:raise HTTPException(422,'请由老师核对构件说明、实际站位、照片标注和寻找指令后确认')
-        if p['heritage_station'].get('detail') and not body.same_target_verified:raise HTTPException(422,'请确认全景和特写标注的是同一处构件')
+        if not body.teacher_verified:raise HTTPException(422,'请由老师核对研学资料、照片标注与观察指引，确认适合现场使用')
+        if p['heritage_station'].get('detail') and not p['heritage_station']['detail'].get('derived_from') and not body.same_target_verified:raise HTTPException(422,'请确认全景和特写标注的是同一处构件')
         p['heritage_confirmed_version']=body.version
         p['heritage_confirmed_snapshot']=copy.deepcopy(p['heritage_station'])
         api.store.save(p);return api.public(p)
 
+    @api.router.put('/projects/{pid}/heritage/timing')
+    @api.serialized
+    def save_timing(pid:str,body:SaveTiming,user=Depends(api.identity)):
+        p=project(pid,user,True)
+        if p.get('heritage_timing_version',0)!=body.version:raise HTTPException(409,'时长设置已变化，请重新打开')
+        timing=body.timing.model_dump()
+        if timing!=timing_for(p):
+            p['heritage_timing']=timing;p['heritage_timing_version']=body.version+1
+            if p.get('heritage_script'):
+                p['heritage_script']['confirmed_version']=None
+                p['heritage_script']['timing_version']=p['heritage_timing_version']
+            p['final_stale']=bool(p.get('final'));p['task_card_stale']=bool(p.get('task_card'))
+            api.store.save(p)
+        return api.public(p)
+
     def update_script(p,script):
         previous=p.get('heritage_script') or {}
         p['heritage_script']={**script,'version':previous.get('version',0)+1,
-                             'station_version':p.get('heritage_version',0),'confirmed_version':None}
+                             'station_version':p.get('heritage_version',0),'timing_version':p.get('heritage_timing_version',0),'confirmed_version':None}
         p['script']=script['intro'];p['story_confirmed']=False
         p['final_stale']=bool(p.get('final'));p['task_card_stale']=bool(p.get('task_card'))
         api.store.save(p)
@@ -141,7 +211,10 @@ def install(api):
     @api.serialized
     def apply_template(pid:str,user=Depends(api.identity)):
         p=project(pid,user,True)
-        update_script(p,script_from_station(p.get('heritage_station') or empty_station()))
+        draft=safe(lambda:script_from_station(p.get('heritage_station') or empty_station(),timing_for(p)))
+        try:Script.model_validate(draft)
+        except ValueError:raise HTTPException(422,'研学资料或观察指引过长，请精简后起草研学脚本；原脚本已保留')
+        update_script(p,draft)
         return api.public(p)
 
     @api.router.put('/projects/{pid}/heritage/script')
@@ -149,7 +222,8 @@ def install(api):
     def save_script(pid:str,body:SaveScript,user=Depends(api.identity)):
         p=project(pid,user,True);check_version(p,body.station_version)
         if (p.get('heritage_script') or {}).get('version',0)!=body.version:raise HTTPException(409,'脚本已变化，请重新打开')
-        update_script(p,body.model_dump(exclude={'version','station_version'}));return api.public(p)
+        if p.get('heritage_timing_version',0)!=body.timing_version:raise HTTPException(409,'时长设置已变化，请重新打开后保存脚本')
+        update_script(p,body.model_dump(exclude={'version','station_version','timing_version'}));return api.public(p)
 
     @api.router.post('/projects/{pid}/heritage/confirm-script')
     @api.serialized
@@ -157,6 +231,9 @@ def install(api):
         p=project(pid,user,True);script=p.get('heritage_script')
         if not script or script['version']!=body.version:raise HTTPException(409,'脚本不存在或已变化')
         if script['station_version']!=p.get('heritage_version',0):raise HTTPException(409,'资料已更新，请重新检查并保存脚本')
+        if p.get('heritage_timing_version',0)!=body.timing_version:raise HTTPException(409,'时长已变化，请按新时长核对脚本')
+        if script.get('timing_version',0)!=p.get('heritage_timing_version',0):raise HTTPException(409,'脚本对应的时长已过期，请保存脚本后重新核对')
+        if HISTORY_PLACEHOLDER in script['intro']:raise HTTPException(422,'请补充地方历史资料并完善历史引入，再确认脚本')
         if not body.teacher_verified:raise HTTPException(422,'请老师审核三段台词后确认')
         script['confirmed_version']=script['version'];api.store.save(p);return api.public(p)
 
@@ -164,14 +241,24 @@ def install(api):
         try:
             from models.llm_client import LLM
             p=api.store.load(pid);station=p.get('heritage_station') or empty_station()
-            prompt=('你为古建研学老师起草30秒短片脚本。只使用老师提供的事实，不补充年代、结构数量、方位或历史结论。'
-                    '根据适用年级，用易懂的中文，按故事引入12秒、实拍定位11秒、现场任务7秒安排。'
+            timing=timing_for(p);duration=sum(timing.values());station_version=p.get('heritage_version',0);timing_version=p.get('heritage_timing_version',0);script_version=(p.get('heritage_script') or {}).get('version',0)
+            prompt=(f'你为古建研学老师起草{duration}秒短片脚本。只使用老师提供的事实，不补充年代、结构数量、方位或历史结论。'
+                    f'根据适用年级，用易懂的中文，按历史引入{timing["intro"]}秒、实物观察{timing["location"]}秒、现场任务{timing["task"]}秒安排。'
+                    '根据每段时间控制文字量；历史段时间充足时，讲清背景、历史价值和修缮线索，再引出构件。'
+                    'intro必须先讲一个资料中明确给出的地方历史重点，再引出本次构件，不能只有寻找问题。'
+                    '不虚构历史人物对话、传说或未提供的年代，不将后期修缮构件一概当作始建时原构。'
+                    'location结合构件特点与观察指引，task给出一个可执行任务和观察问题。'
+                    '资料来源链接、现场核对备注与待确认事项不写进学生台词；资料有缺口时明确留待老师补充。'
                     '禁止让AI画面代替实拍构件证据，最后必须指向老师标注的实拍。'
                     '输出JSON，只有intro、location、task三个字符串字段，分别最多400、240、380字。老师资料：'+json.dumps(station,ensure_ascii=False))
             from config import Config
             raw=api.call(user,'text',pid,lambda:LLM().query(prompt,model=Config.LLM_MODEL))
             script=Script.model_validate(parse_json(raw)).model_dump()
-            update_script(p,script);api.store.finish(jid)
+            with api.mutation_lock:
+                current=api.store.load(pid)
+                if (current.get('heritage_version',0)!=station_version or current.get('heritage_timing_version',0)!=timing_version or (current.get('heritage_script') or {}).get('version',0)!=script_version):raise UserError('起草期间资料、时长或脚本已变化，未覆盖当前内容，请核对后重新起草')
+                update_script(current,script)
+            api.store.finish(jid)
         except Exception as exc:
             api.store.finish(jid,str(exc)[:500] if isinstance(exc,UserError) else '脚本起草失败，原资料和已生成镜头保留，请检查模型设置后手动重试')
 
@@ -179,7 +266,8 @@ def install(api):
     @api.serialized
     def ai_script(pid:str,user=Depends(api.identity)):
         p=project(pid,user,True)
-        if not (p.get('heritage_station') or {}).get('checked_description','').strip():raise HTTPException(422,'请先填写已核对的构件说明')
+        if not (p.get('heritage_station') or {}).get('checked_description','').strip():raise HTTPException(422,'请先填写研学资料')
+        if not research_excerpt(p['heritage_station']['checked_description'])[0]:raise HTTPException(422,'研学资料还缺少地方历史背景，请先补充一条已核对事实；本次未调用模型')
         jid=api.store.enqueue(pid,user['id'],'heritage-script');api.pool.submit(run_script,jid,pid,user)
         return api.public(api.store.load(pid))
 
@@ -191,7 +279,8 @@ def install(api):
         if p['shots'] and not body.replace_confirmed:raise HTTPException(409,'已有故事镜头，请确认替换；原文件仍保留')
         selected=[s for s in source['shots'] if s['id'] in body.shot_ids]
         if len(selected)!=len(body.shot_ids):raise HTTPException(422,'选择的源镜头不存在')
-        if sum(s.get('duration',5) for s in selected)>12:raise HTTPException(422,'请选择总时长不超过12秒的故事镜头')
+        intro_seconds=timing_for(p)['intro']
+        if sum(s.get('duration',5) for s in selected)>intro_seconds:raise HTTPException(422,f'请选择总时长不超过{intro_seconds}秒的故事镜头')
         for s in selected:
             if not s.get('rendered') or any(s.get(k) for k in ('image_stale','clip_stale','rendered_stale')):
                 raise HTTPException(422,'所选镜头尚未完成确认或视频处理')
@@ -226,7 +315,7 @@ def install(api):
         station=validate_ready(p,api.store)
         if p.get('heritage_confirmed_version')!=p.get('heritage_version',0):raise UserError('请老师先确认当前照片、标注和任务资料')
         script=p.get('heritage_script')
-        if not script or script.get('station_version')!=p.get('heritage_version',0) or script.get('confirmed_version')!=script['version']:
+        if not script or script.get('station_version')!=p.get('heritage_version',0) or script.get('confirmed_version')!=script['version'] or script.get('timing_version',0)!=p.get('heritage_timing_version',0):
             raise UserError('请老师先审核当前版本的研学脚本')
         return station,script
 
@@ -260,7 +349,9 @@ def install(api):
     @api.router.post('/projects/{pid}/heritage/export')
     @api.serialized
     def export(pid:str,body:Export,user=Depends(api.identity)):
-        p=project(pid,user,True);check_version(p,body.version);safe(lambda:ready(p))
+        p=project(pid,user,True);check_version(p,body.version)
+        if body.timing_version!=p.get('heritage_timing_version',0):raise HTTPException(409,'时长已变化，请重新打开后导出')
+        safe(lambda:ready(p))
         jid=api.store.enqueue(pid,user['id'],'heritage-export');api.pool.submit(run_export,jid,pid,user,body.kind,body.narration)
         return api.public(api.store.load(pid))
 
