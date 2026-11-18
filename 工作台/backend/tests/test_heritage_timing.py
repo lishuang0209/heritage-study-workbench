@@ -129,7 +129,7 @@ def test_custom_narration_accepts_longer_intro_and_keeps_requested_total(tmp_pat
     from scenarios.ink_drama.providers import Providers,checked_ffmpeg
     provider=Providers();target=tmp_path/'original.mp4';calls=[]
     checked_ffmpeg(['-f','lavfi','-i','color=c=white:s=180x320:r=30:d=23','-c:v','libx264','-pix_fmt','yuv420p',str(target)])
-    def speak(text,voice,path):
+    def speak(text,voice,path,**kwargs):
         calls.append(text);seconds=13 if text=='长历史' else 1
         checked_ffmpeg(['-f','lavfi','-i',f'sine=frequency=440:duration={seconds}',str(path)])
     provider.speak=speak;facade=SimpleNamespace(providers=provider,call=lambda user,kind,pid,fn:fn())

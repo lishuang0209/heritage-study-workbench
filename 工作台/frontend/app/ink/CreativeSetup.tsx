@@ -2,8 +2,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Film, Plus, Settings2, Upload, X, LoaderCircle, Trash2, RotateCcw } from 'lucide-react';
 import { api, json, inkPresets, type CreativeSettings, type Project, type SettingAsset } from './ink-shared';
-import { setupSteps, setupSignature, confirmedSetupReviews, isSetupReviewed, nextSetupStep, setupGenerationJob, type SetupStep, type SetupGeneration } from './creative-setup-state';
+import { setupSteps, setupSignature, confirmedSetupReviews, isSetupReviewed, nextSetupStep, setupGenerationJob, setupMaterialSettings, setupImagePresentation, type SetupStep, type SetupGeneration } from './creative-setup-state';
 import JobStatus from './JobStatus';
+import {missingGuideReference} from './heritage/guide-state';
 import { HistoryBadge, HistoryVersions, type HistoryMeta } from './HistoryVersions';
 
 type Props = { project: Project; disabled: boolean; run: (fn: () => Promise<unknown>) => Promise<void>; onUpdated: (p: Project) => Project; onConfirmed: () => void; onExtract: () => Promise<Project>; onPrimaryLabel: (label: string) => void };
@@ -14,11 +15,11 @@ const selectedPreset = (style: string) => inkPresets.find(preset => style.includ
 type SettingVersion = HistoryMeta & {image:string; image_url:string; created:number; source:string; style:string};
 const labels = { characters:'角色', scenes:'场景', props:'道具' };
 function initial(p: Project): CreativeSettings {
-  return p.creative_draft || p.creative_settings || {
+  return setupMaterialSettings(p.creative_draft || p.creative_settings || {
     characters:p.characters.map(c=>({...c,desc:p.baseline?.characters.find(x=>x.character_id===c.id)?.desc||c.desc})),
     scenes:[...new Set(p.shots.map(s=>s.scene).filter(Boolean))].map((name,i)=>({id:`scene${i+1}`,name,desc:name})),
     props:[],style:presetStyle(inkPresets[1]),
-  };
+  },p.project_type==='heritage');
 }
 export default function CreativeSetup({project:p,disabled,run,onUpdated,onConfirmed,onExtract,onPrimaryLabel}:Props) {
   const seed=JSON.stringify(initial(p));
@@ -52,24 +53,26 @@ export default function CreativeSetup({project:p,disabled,run,onUpdated,onConfir
   const feedbackRef=useRef<HTMLDivElement>(null);
   useEffect(()=>{setData(JSON.parse(seed));},[seed]);
   useEffect(()=>{if(editor) dialog.current?.showModal();},[editor]);
-  const steps=setupSteps(data);
+  const heritage=p.project_type==='heritage';
+  const steps=setupSteps(data,heritage);
   const index=Math.max(0,steps.findIndex(x=>x.key===selected));
   const current=steps[index];
   const item=current.asset;
-  const photoReference=p.heritage_setting_references?.find(reference=>reference.group===current.group && reference.asset_id===item?.id && reference.asset_name===item.name);
+  const presentation=setupImagePresentation(current.group,heritage,!!item?.image);
   const signature=(step:SetupStep)=>setupSignature(step,data.style);
+  const needsGuideReference=missingGuideReference(p,data);
+  const guideSelected=current.group==='characters'&&item?.id===p.heritage_guide?.character_id;
   const savedReviews=confirmedSetupReviews(p.creative_settings);
-  const isReviewed=(step:SetupStep)=>isSetupReviewed(step,data.style,reviewed,savedReviews);
+  const isReviewed=(step:SetupStep)=>!(needsGuideReference&&step.asset?.id===p.heritage_guide?.character_id)&&isSetupReviewed(step,data.style,reviewed,savedReviews);
   const needsExtraction=!data.characters.length&&!data.scenes.length&&!data.props.length;
   const next=nextSetupStep(steps,current.key,isReviewed);
   const reviewedCount=steps.filter(isReviewed).length;
   const nextName=next?.step.asset?.name || (next ? labels[next.step.group] : '');
   const label=needsExtraction?'从剧本整理设定':!item&&current.group==='scenes'?'添加场景':next
     ? '确认'+labels[current.group]+'，'+(next.returning?'返回检查':'继续')+nextName
-    : '确认完成，进入分镜';
+    : heritage?'确认素材与画风，进入画面':'确认完成，进入分镜';
   useEffect(()=>{onPrimaryLabel(label);},[label,onPrimaryLabel]);
-  const openEditor=(isNew=false)=>{
-    const group=current.group;
+  const openEditor=(isNew=false,group:Group=current.group)=>{
     const id=group==='characters'?['c1','c2'].find(id=>!data.characters.some(c=>c.id===id)):`${group}_${crypto.randomUUID().slice(0,8)}`;
     if(isNew&&!id)return;
     setEditError('');setEditor({group,isNew,asset:isNew?{id:id!,name:'',desc:''}:{...item!},style:data.style});
@@ -83,7 +86,7 @@ export default function CreativeSetup({project:p,disabled,run,onUpdated,onConfir
       try {
         const updated = await api<Project>(`/projects/${p.id}/generate-setting-image`, json('POST', {
           settings: data, group: current.group, asset_id: item.id, redesign,
-          view: current.group === 'characters' ? 'sheet' : 'front',
+          view: presentation.view,
         }));
         const job=updated.jobs[0];
         if(!job || job.action!=='asset-image')throw new Error('暂未读到生成任务状态，请重新打开项目查看任务记录。');
@@ -105,6 +108,7 @@ export default function CreativeSetup({project:p,disabled,run,onUpdated,onConfir
   const confirm=()=>void run(async()=>{
     if(needsExtraction){await onExtract();return;}
     if(!item&&current.group==='scenes'){openEditor(true);return;}
+    if(needsGuideReference&&(guideSelected||!next))throw new Error('请先生成或上传小向导角色参考图，再确认继续。');
     setReviewed(previous=>({...previous,[current.key]:signature(current)}));
     if(next){setSelected(next.step.key);return;}
     onUpdated(await api<Project>(`/projects/${p.id}/creative-settings`,json('PUT',data)));onConfirmed();
@@ -125,22 +129,21 @@ export default function CreativeSetup({project:p,disabled,run,onUpdated,onConfir
 
   return <>
     <form id="creative-settings-form" onSubmit={e=>{e.preventDefault();confirm();}}>
-      <div className="ink-setup-toolbar"><span>设定素材{!needsExtraction ? ' · 已确认 '+reviewedCount+'/'+steps.length : ''}</span>{!needsExtraction?<details className="ink-setup-more"><summary>更多</summary><button type="button" disabled={disabled} onClick={e=>{e.currentTarget.closest('details')?.removeAttribute('open');if(window.confirm('重新整理会调用文本模型并替换未确认的设定草稿，继续吗？'))void run(onExtract);}}>重新从剧本整理</button></details>:null}</div>
+      <div className="ink-setup-toolbar"><span>{heritage?'分镜所需素材':'设定素材'}{!needsExtraction ? ' · 已确认 '+reviewedCount+'/'+steps.length : ''}</span>{!needsExtraction&&!heritage?<details className="ink-setup-more"><summary>更多</summary><button type="button" disabled={disabled} onClick={e=>{e.currentTarget.closest('details')?.removeAttribute('open');if(window.confirm('重新整理会调用文本模型并替换未确认的设定草稿，继续吗？'))void run(onExtract);}}>重新从剧本整理</button></details>:null}</div>
+      {heritage?<p className="ink-wizard-footnote">建筑与构件依据研学资料生成单张素材图，实拍图用于现场定位与标注。</p>:null}
+      {heritage&&(!data.characters.length||!data.props.length)?<div className="ink-wizard-secondary">{!data.characters.length?<button type="button" disabled={disabled} onClick={()=>openEditor(true,'characters')}><Plus size={14}/>添加角色（可选）</button>:null}{!data.props.length?<button type="button" disabled={disabled} onClick={()=>openEditor(true,'props')}><Plus size={14}/>添加构件或道具（可选）</button>:null}</div>:null}
       <nav className="ink-wizard-thumbs" aria-label="角色场景道具">{steps.map((step,i)=><button type="button" key={step.key} disabled={disabled} aria-current={i===index?'true':undefined} onClick={()=>setSelected(step.key)}>{step.asset?.image?<img src={`/api/ink/projects/${p.id}/assets/${step.asset.image}`} alt={step.asset.name}/>:<Film size={22}/>}<span>{step.asset?.name||labels[step.group]}</span><small>{isReviewed(step)?'已确认':labels[step.group]}</small></button>)}<button type="button" className="ink-setup-add" disabled={disabled||(current.group==='characters'&&data.characters.length>=2)||(current.group==='scenes'&&data.scenes.length>=12)||(current.group==='props'&&data.props.length>=20)} onClick={()=>openEditor(true)} title={current.group==='characters'&&data.characters.length>=2?'最多支持两位角色':`添加${labels[current.group]}`}><Plus size={22}/><span>添加{labels[current.group]}</span></button></nav>
       {next?.returning?<p className="ink-wizard-footnote" role="status">前面还有设定未确认，确认当前{labels[current.group]}后将返回检查“{nextName}”。</p>:null}
       <section className="ink-wizard-scene">
-        <div className={`ink-wizard-media ${current.group==='characters'?'ink-character-sheet':''}`}>{item?.image?<a href={`/api/ink/projects/${p.id}/assets/${item.image}`} target="_blank" rel="noreferrer"><img src={`/api/ink/projects/${p.id}/assets/${item.image}`} alt={`${item.name}设定图`}/></a>:<div><Film size={42}/><p>{current.group==='characters'?'生成正面、侧面、背面三视图':'可以生成或上传参考图'}</p></div>}</div>
+        <div className={`ink-wizard-media ${current.group==='characters'?'ink-character-sheet':''}`}>{item?.image?<a href={`/api/ink/projects/${p.id}/assets/${item.image}`} target="_blank" rel="noreferrer"><img src={`/api/ink/projects/${p.id}/assets/${item.image}`} alt={`${item.name}设定图`}/></a>:<div><Film size={42}/><p>{presentation.placeholder}</p></div>}</div>
 
         <div className="ink-wizard-scene-copy"><p className="ink-wizard-eyebrow">{labels[current.group]} · {index+1} / {steps.length}</p><h3>{item?.name||`确认${labels[current.group]}`}</h3><p>{item?.desc||(current.group==='scenes'?'添加故事发生的场景。':`没有${labels[current.group]}可以直接继续。`)}</p>
-          {item?<><div className="ink-wizard-style-picker"><fieldset className="ink-style-options"><legend>水墨类型</legend><div className="ink-style-card-grid">{inkPresets.map(preset=><label key={preset.id} className={`ink-style-choice ${selectedPreset(data.style)?.id===preset.id?'is-selected':''} ${disabled?'is-disabled':''}`}><input type="radio" name="creative-ink-style" value={preset.id} checked={selectedPreset(data.style)?.id===preset.id} disabled={disabled} onChange={()=>{setData(d=>({...d,style:presetStyle(preset)}));}}/><span><img src={`/ink-styles/${preset.id}${styleSampleSuffix[current.group]}.png?v=asset-types-20261111`} alt={`${preset.name}笔墨参考`} style={{width:"100%",height:140,objectFit:"contain",borderRadius:8,marginBottom:8}}/><strong>{preset.name}</strong><small>{preset.description}</small></span></label>)}</div></fieldset><p className="ink-wizard-footnote" role="status">当前画风：{selectedPreset(data.style)?.name || '自定义'}。{photoReference ? '主体依据已上传实拍，画风按当前选择转绘。' : current.group==='characters' && item.image ? '依据当前角色生成正面、侧面、背面三视图，采用所选画风。' : '生成时参考对应样张的笔墨，主体按当前设定。'}</p></div>
-          {photoReference ? <div className="ink-setup-photo-reference">
-            {photoReference.preview_url ? <a href={photoReference.preview_url} target="_blank" rel="noreferrer" aria-label="查看本次使用的实拍标注"><img src={photoReference.preview_url} alt="现场定位图及目标标注"/></a> : null}
-            <div><strong>实拍参考 · {item.name}</strong><p>{photoReference.error || (photoReference.mode==='crop' ? '自动截取定位图的框选区域，作为构件形制参考。' : photoReference.mode==='arrow' ? '使用定位图箭头所指的构件，作为主体参考。' : '使用已上传定位图，保留照片中可见的建筑与布局。')}</p></div>
-          </div> : null}
-          <div className="ink-wizard-secondary ink-setup-image-actions"><button type="button" className="ink-primary-button" disabled={disabled||generating||!data.scenes.length} aria-busy={generating} aria-describedby={generationJob?feedbackId:undefined} onClick={()=>generateImage()}>{generating?<><LoaderCircle size={15} className="ink-job-spinner"/>{generationJob?.state==='submitting'?'正在提交…':'正在生成…'}</>:photoReference?(item.image?'按实拍重新生成':'根据实拍生成'):current.group==='characters'?'生成三视图':item.image?'重新生成':'生成图片'}</button>{current.group==='characters' && item.image ? <button type="button" disabled={disabled} onClick={()=>{if(window.confirm('重新设计将按当前文字生成新形象，不参考当前角色图。原图保留在历史图片中。'))generateImage(true);}}>重新设计角色</button>:null}<button type="button" disabled={disabled} onClick={()=>openEditor()}><Settings2 size={14}/>调整</button><button type="button" disabled={disabled} onClick={()=>upload.current?.click()}><Upload size={14}/>上传图片</button><button type="button" disabled={disabled} onClick={()=>void run(async()=>{const result=await api<{items:SettingVersion[]}>(`/projects/${p.id}/setting-history/${current.group}/${item.id}?include_deleted=true`);setHistoryMessage('');setHistoryError('');setHistory({group:current.group,asset:item,items:result.items});})}>历史图片</button></div></>:null}
+          {guideSelected&&!item?.image?<p className="ink-wizard-review" role="status">先生成或上传小向导参考图，后续出镜画面会复用同一形象。</p>:null}
+          {item?<><div className="ink-wizard-style-picker"><fieldset className="ink-style-options"><legend>水墨类型</legend><div className="ink-style-card-grid">{inkPresets.map(preset=><label key={preset.id} className={`ink-style-choice ${selectedPreset(data.style)?.id===preset.id?'is-selected':''} ${disabled?'is-disabled':''}`}><input type="radio" name="creative-ink-style" value={preset.id} checked={selectedPreset(data.style)?.id===preset.id} disabled={disabled} onChange={()=>{setData(d=>({...d,style:presetStyle(preset)}));}}/><span><img src={`/ink-styles/${preset.id}${styleSampleSuffix[current.group]}.png?v=asset-types-20261111`} alt={`${preset.name}笔墨参考`} style={{width:"100%",height:140,objectFit:"contain",borderRadius:8,marginBottom:8}}/><strong>{preset.name}</strong><small>{preset.description}</small></span></label>)}</div></fieldset><p className="ink-wizard-footnote" role="status">当前画风：{selectedPreset(data.style)?.name || '自定义'}。{presentation.hint}</p></div>
+          <div className="ink-wizard-secondary ink-setup-image-actions"><button type="button" className="ink-primary-button" disabled={disabled||generating||!data.scenes.length} aria-busy={generating} aria-describedby={generationJob?feedbackId:undefined} onClick={()=>generateImage()}>{generating?<><LoaderCircle size={15} className="ink-job-spinner"/>{generationJob?.state==='submitting'?'正在提交…':'正在生成…'}</>:presentation.label}</button>{current.group==='characters' && item.image ? <button type="button" disabled={disabled} onClick={()=>{if(window.confirm('重新设计将按当前文字生成新形象，不参考当前角色图。原图保留在历史图片中。'))generateImage(true);}}>重新设计角色</button>:null}<button type="button" disabled={disabled} onClick={()=>openEditor()}><Settings2 size={14}/>调整</button><button type="button" disabled={disabled} onClick={()=>upload.current?.click()}><Upload size={14}/>上传图片</button><button type="button" disabled={disabled} onClick={()=>void run(async()=>{const result=await api<{items:SettingVersion[]}>(`/projects/${p.id}/setting-history/${current.group}/${item.id}?include_deleted=true`);setHistoryMessage('');setHistoryError('');setHistory({group:current.group,asset:item,items:result.items});})}>历史图片</button></div></>:null}
 
           {generationJob ? <div ref={feedbackRef} id={feedbackId} className="ink-setup-feedback"><JobStatus jobs={[generationJob]} title={generation?.key===current.key?`生成${labels[current.group]}图 · ${generation.name}`:undefined} successHint={generation?`已按${generation.style}完成生成并更新图片，请核对主体与画风后再确认。`:undefined}/></div> : null}
-          <p className="ink-wizard-footnote">设定图可选。整理剧本和生成图片会调用模型，确认继续不会。</p>
+          <p className="ink-wizard-footnote">{guideSelected?'小向导参考图用于统一脸型、发型和服装。':'设定图可选。整理剧本和生成图片会调用模型，确认继续不会。'}</p>
         </div>
       </section>
       <input ref={upload} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" disabled={disabled} aria-label="上传设定参考图" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file&&item)void run(async()=>{const form=new FormData();form.append('file',file);const result=await api<{image:string}>(`/projects/${p.id}/setting-image`,{method:'POST',body:form});onUpdated(await api<Project>(`/projects/${p.id}/select-setting-image`,json('POST',{settings:data,group:current.group,asset_id:item.id,image:result.image,source:'upload'})));});}}/>

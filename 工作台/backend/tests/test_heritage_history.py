@@ -9,6 +9,7 @@ from scenarios.ink_drama.domain import UserError
 from scenarios.ink_drama.providers import Providers
 from test_ink_demo import api, setup
 from test_heritage_study import prepared
+from heritage_planner_fixtures import planner_reply
 
 
 def settings():
@@ -35,22 +36,26 @@ def test_history_sections_accept_multiple_paragraphs_and_keep_sources_and_observ
 @pytest.mark.parametrize('seconds',[3,12,45,60,180])
 def test_narration_is_not_lost_and_durations_match_custom_budget(seconds):
     text=script_from_station(CASES[0]['station'],dict(intro=60,location=11,task=5))['intro']
-    nodes=narration_nodes(text,seconds);durations=allocate_seconds(nodes,seconds)
+    nodes=narration_nodes(text,seconds)
+    if seconds in (3,12):
+        with pytest.raises(UserError): allocate_seconds(nodes,seconds)
+        assert ''.join(nodes)==text
+        return
+    durations=allocate_seconds(nodes,seconds)
     assert ''.join(nodes)==text
     assert sum(durations)==seconds and all(2<=duration<=15 for duration in durations)
     assert len(nodes)<=30
 
 
-@pytest.mark.parametrize('seconds',[30,45])
-def test_narration_only_history_ignores_hallucinated_character_ids_and_keeps_exact_words(seconds):
+@pytest.mark.parametrize('seconds',[45,60])
+def test_narration_only_history_keeps_exact_approved_words_with_two_calls(seconds):
     text=script_from_station(CASES[0]['station'],dict(intro=45,location=11,task=5))['intro']
     prompts=[]
     def query(prompt):
         prompts.append(prompt)
-        return json.dumps(dict(content='仅展示大殿梁架',scene_id='temple',camera='仰拍特写',motion='固定机位',prop_ids=['bracket'],
-                               characters=[dict(id='c1',name='讲解员')],character_ids=['c1','undefined'],dialogues=[dict(character_id='c1',text='模型改写的错误旁白')]))
+        return planner_reply(prompt)
     result=history_board(text,query,settings(),seconds)
-    assert len(result['shots'])>=4 and len(prompts)==len(result['shots'])
+    assert len(result['shots'])>=4 and len(prompts)==2
     assert result['characters']==[] and all(shot['character_ids']==[] for shot in result['shots'])
     assert ''.join(line['text'] for shot in result['shots'] for line in shot['dialogues'])==text
     assert all(line['character_id']=='narrator' for shot in result['shots'] for line in shot['dialogues'])
@@ -59,9 +64,9 @@ def test_narration_only_history_ignores_hallucinated_character_ids_and_keeps_exa
 
 def test_provider_routes_authoritative_empty_cast_history_without_generic_story_planning(monkeypatch):
     from models.llm_client import LLM
-    monkeypatch.setattr(LLM,'query',lambda self,*args,**kwargs:json.dumps(dict(content='建筑全景',scene_id='temple',camera='全景',motion='固定镜头',prop_ids=[])))
+    monkeypatch.setattr(LLM,'query',lambda self,prompt,**kwargs:planner_reply(prompt))
     result=Providers().split('保国寺大殿建于北宋。',settings=settings(),planning=dict(kind='heritage-history',duration_seconds=12,narration='保国寺大殿建于北宋。'))
-    assert result['storyboard_engine']=='heritage-history-facts-v2'
+    assert result['storyboard_engine']=='heritage-visit-route-v4'
     assert sum(s['duration'] for s in result['shots'])==12
 
 
@@ -84,7 +89,7 @@ def test_history_script_update_retains_old_assets_and_prevents_adopting_obsolete
         export_video(api,store.load(p['id']),{}, {},store.folder(p['id']),store.folder(p['id'])/'out.mp4')
 
 
-@pytest.mark.parametrize('seconds',[30,45])
+@pytest.mark.parametrize('seconds',[45,60])
 def test_api_split_keeps_old_shots_until_new_history_draft_is_adopted(setup,monkeypatch,seconds):
     from models.llm_client import LLM
     from scenarios.ink_drama.domain import board
@@ -97,7 +102,7 @@ def test_api_split_keeps_old_shots_until_new_history_draft_is_adopted(setup,monk
     class Immediate:
         def submit(self,fn,*args):fn(*args)
     monkeypatch.setattr(api,'pool',Immediate())
-    monkeypatch.setattr(LLM,'query',lambda self,*args,**kwargs:json.dumps(dict(content='建筑梁架',scene_id='temple',camera='全景',motion='固定镜头',prop_ids=[],character_ids=['undefined'])))
+    monkeypatch.setattr(LLM,'query',lambda self,prompt,**kwargs:planner_reply(prompt))
     base=f'/api/ink/projects/{p["id"]}'
     response=client.post(base+'/actions/split')
     assert response.status_code==200,response.text
@@ -113,3 +118,10 @@ def test_api_split_keeps_old_shots_until_new_history_draft_is_adopted(setup,monk
     assert response.status_code==200,response.text
     assert not response.json()['heritage_story_stale']
     assert response.json()['storyboard_history'][-1]['shots'][0]['content']=='旧画面'
+
+
+def test_first_narrated_shot_has_time_to_finish_before_next_shot():
+    words = ['宁波保国寺的前身是灵山寺。', '再看斗拱。']
+    assert allocate_seconds(words, 6) == [4, 2]
+    with pytest.raises(UserError, match='至少需要6秒'):
+        allocate_seconds(words, 5)

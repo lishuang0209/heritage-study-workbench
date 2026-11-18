@@ -192,6 +192,10 @@ def framing_constraint(shot):
 
 
 def frame_prompt(p, shot):
+    from scenarios.heritage_study.guide import guide_shot
+    if p.get('project_type')=='heritage' and (not shot.get('character_ids') or guide_shot(p,shot)):
+        from scenarios.heritage_study.frame_design import unmanned_frame_prompt
+        return unmanned_frame_prompt(p,shot)
     from .media_format import frame_instruction
     from .background import background_context
     from .creative import settings_context
@@ -215,7 +219,7 @@ def frame_prompt(p, shot):
                       '严格绘制动作开始前的站位和姿势，不提前完成后续走动、递接或转身。参考人物图只用于外貌和服饰，不继承其画风、笔触、明暗塑形或姿势。',
                       style, '首帧画面内容：' + shot['content'], '场景：' + shot['scene'],
                       '镜头构图：' + shot['camera'],
-                      '只绘制首帧描述指定的一幅静态起始画面，不推演后续动作，不绘制连续多格。',
+                      '只绘制首帧描述指定的一幅静态起始画面，不推演后续动作，不绘制连续多格。人物、建筑和构件的三视图参考只提供形制依据，当前分镜只展示一个视角，不复制三视图的并排布局或拼图。同一素材的不同视角不代表多栋建筑，不得将其屋脊、立面或门窗叠加融合；仅按本镜指定景别取景，不为保留素材全貌而扩大局部镜头。',
                       '人物：' + (json.dumps(chars, ensure_ascii=False) if chars else '无人景物，不要添加人物'),
                       '保持已确认角色的面容、服饰、发饰。发型属于固定身份特征：发髻数量、位置、轮廓、头发收束或披散方式、发绳配饰与角色设定一致。侧身、背身和远景只改变可见角度，不重新设计发型；画风可简化笔触，但不能改变发髻结构。不将参考图的构图复制到本镜头。',
                       '参考图只提供身份、服饰和场景依据；笔墨材质以当前选定画风为准。',
@@ -259,6 +263,8 @@ class Store:
                     owner TEXT, kind TEXT, payload TEXT, created REAL);
                 CREATE TABLE IF NOT EXISTS trials(owner TEXT PRIMARY KEY, ended REAL);
             ''')
+            if 'progress' not in {row['name'] for row in db.execute('PRAGMA table_info(jobs)')}:
+                db.execute("ALTER TABLE jobs ADD COLUMN progress TEXT NOT NULL DEFAULT '{}'")
 
     @contextmanager
     def db(self):
@@ -327,8 +333,16 @@ class Store:
         with self.db() as db:
             if db.execute("SELECT 1 FROM jobs WHERE project=? AND state='running'", (pid,)).fetchone():
                 raise UserError('该项目正在处理，请等待完成')
-            db.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?,?)', (jid, pid, owner, action, 'running', '', time.time()))
+            db.execute('INSERT INTO jobs(id,project,owner,action,state,error,created) VALUES(?,?,?,?,?,?,?)', (jid, pid, owner, action, 'running', '', time.time()))
         return jid
+
+    def progress(self, jid, message, completed, total):
+        if (type(completed) is not int or type(total) is not int or not 0<=completed<=total<=100
+            or total==0 or not isinstance(message,str) or not message.strip() or len(message)>160):
+            raise ValueError('无效的任务进度')
+        payload=json.dumps(dict(message=message,completed=completed,total=total,updated=time.time()),ensure_ascii=False)
+        with self.db() as db:
+            db.execute("UPDATE jobs SET progress=? WHERE id=? AND state='running'",(payload,jid))
 
     def finish(self, jid, error=None):
         with self.db() as db:
@@ -336,7 +350,13 @@ class Store:
 
     def jobs(self, pid):
         with self.db() as db:
-            return [dict(r) for r in db.execute('SELECT * FROM jobs WHERE project=? ORDER BY created DESC LIMIT 12', (pid,))]
+            rows=[dict(r) for r in db.execute('SELECT * FROM jobs WHERE project=? ORDER BY created DESC LIMIT 12', (pid,))]
+        for row in rows:
+            try:
+                row['progress']=json.loads(row['progress']) or None
+            except (json.JSONDecodeError,TypeError):
+                row['progress']=None
+        return rows
 
     def event(self, pid, owner, kind, payload=None):
         with self.db() as db:
@@ -378,6 +398,7 @@ class Store:
         p = copy.deepcopy(source)
         p.update(id=uuid.uuid4().hex, owner=owner, source_project=pid,
                  title=source['title'] + ' · 副本', created_at=time.time(), feedback=None)
+        p.pop('archived', None)
         shutil.copytree(self.folder(pid), self.folder(p['id']), dirs_exist_ok=True)
         self.save(p)
         self.event(p['id'], owner, 'clone', {'source': pid})

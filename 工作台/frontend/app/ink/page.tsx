@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, Film, Settings2, Plus, Landmark } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Film, Settings2, Plus, Landmark, Trash2 } from 'lucide-react';
 import './ink.css';
 import ApiSettings from './ApiSettings';
 import InkWizard from './InkWizard';
@@ -75,9 +75,10 @@ export default function InkPage() {
   const label = 'block text-xs text-neutral-500 mb-2';
   const button = 'ink-primary-button';
 
-  const studyProjects = projects.filter(item => item.project_type === 'heritage');
+  const studyProjects = projects.filter(item => item.project_type === 'heritage' && !item.archived);
+  const baoguoExample = projects.find(item => item.id === '81ba6cf4f7f944ee80467852db0c6c71');
   const current = project;
-  const wizard = current ? <InkWizard key={current.id} project={current} tracks={tracks} readonly={readonly} onWorkingChange={setWorking}
+  const wizard = (onExport?:()=>void) => current ? <InkWizard key={current.id} project={current} tracks={tracks} readonly={readonly} onWorkingChange={setWorking} onExport={onExport}
               onAction={action} onUpdated={updateProject}
               onSave={async (sid, data) => updateProject(await api<Project>(`/projects/${current.id}/shots/${sid}`, json('PATCH', data)))}
               onUpload={async (sid, file) => { const form = new FormData(); form.append('file', file); return updateProject(await api<Project>(`/projects/${current.id}/shots/${sid}/image`, { method: 'POST', body: form })); }}
@@ -87,6 +88,12 @@ export default function InkPage() {
               onClone={async () => { const copy = await api<Project>(`/projects/${current.id}/clone`, { method: 'POST' }); setProject(copy); await refresh(); }}
             /> : null;
   const createStudy = async (caseId: string) => {
+    if (caseId === 'baoguo' && baoguoExample) {
+      const copy = await api<Project>(`/projects/${baoguoExample.id}/clone`, { method: 'POST' });
+      setProject(copy);
+      await refresh();
+      return;
+    }
     const data = await api<{templates:{id:string;title:string;station:Partial<Station>}[]}>('/heritage/templates');
     const example = data.templates.find(x=>x.id===caseId);
     let created = await api<Project>('/projects',json('POST',{project_type:'heritage',title:example?.title||'新建古建讲解站',script:'研学故事待老师编辑与确认。'}));
@@ -124,10 +131,10 @@ export default function InkPage() {
                   {id:'baoguo',title:'保国寺 · 找斗拱',description:'沿着柱子向上，观察木构件如何层层伸出',tag:'斗拱 · 实拍定位'},
                   {id:'ningyuan',title:'宁远文庙 · 找柱础',description:'从角柱全景，找到同一柱脚的石狮',tag:'柱础 · 全景与特写'},
                   {id:'taihe',title:'太和殿 · 找小兽',description:'先定位屋角，再观察排成一列的小兽',tag:'屋角 · 远景与特写'},
-                ].map(example=><button key={example.id} type="button" className="ink-example-card" disabled={working} onClick={()=>void perform(()=>createStudy(example.id))}><div className="ink-example-media"><Landmark size={25} strokeWidth={1.5} aria-hidden="true"/><span className="ink-example-use">使用模板<ArrowRight size={13} aria-hidden="true"/></span></div><div className="ink-example-copy"><h3>{example.title}</h3><p>{example.description}</p><span>{example.tag}</span></div></button>)}</div>
+                ].map(example=><button key={example.id} type="button" className="ink-example-card" disabled={working} onClick={()=>void perform(()=>createStudy(example.id))}><div className="ink-example-media">{example.id==='baoguo' && baoguoExample?.cover_url ? <img src={baoguoExample.cover_url} alt="" /> : <Landmark size={25} strokeWidth={1.5} aria-hidden="true"/>}<span className="ink-example-use">使用模板<ArrowRight size={13} aria-hidden="true"/></span></div><div className="ink-example-copy"><h3>{example.title}</h3><p>{example.description}</p><span>{example.tag}</span></div></button>)}</div>
               </section>
-              {studyProjects.length ? <section className="ink-recent" aria-labelledby="ink-recent-title"><div className="ink-section-heading"><h2 id="ink-recent-title">最近创作</h2><span>{studyProjects.length}个项目</span></div><div className="ink-recent-grid">{studyProjects.map(item => <button key={item.id} type="button" className="ink-recent-card" disabled={working} onClick={() => perform(() => open(item.id))}><span className="ink-recent-icon"><Film size={19} strokeWidth={1.5} aria-hidden="true" /></span><span className="ink-recent-copy"><strong>{item.title}</strong><span>{!me.trial_mode || item.owner === me.id ? '继续创作' : '查看项目'}</span></span><ArrowRight size={15} aria-hidden="true" /></button>)}</div></section> : null}
-            </> : project.project_type === 'heritage' ? <HeritageWorkspace key={project.id} project={project} projects={projects} readonly={readonly} working={working} onUpdated={updateProject} onWorkingChange={setWorking} story={wizard} /> : wizard}
+              {studyProjects.length ? <section className="ink-recent" aria-labelledby="ink-recent-title"><div className="ink-section-heading"><h2 id="ink-recent-title">最近创作</h2><span>{studyProjects.length}个项目</span></div><div className="ink-recent-grid">{studyProjects.map(item => <div key={item.id} className="ink-recent-item"><button type="button" className="ink-recent-card" disabled={working} onClick={() => perform(() => open(item.id))}><span className="ink-recent-icon">{item.cover_url ? <img src={item.cover_url} alt="" /> : <Film size={19} strokeWidth={1.5} aria-hidden="true" />}</span><span className="ink-recent-copy"><strong>{item.title}</strong><span>{!me.trial_mode || item.owner === me.id ? '继续创作' : '查看项目'}</span></span><ArrowRight size={15} aria-hidden="true" /></button>{(!me.trial_mode || (item.owner === me.id && !me.ended)) ? <button type="button" className="ink-recent-remove" disabled={working} aria-label={`移除项目 ${item.title}`} title="移除项目" onClick={() => { if (window.confirm(`从最近创作移除“${item.title}”？项目资料会保留在本机。`)) void perform(async () => { await api(`/projects/${item.id}`, {method:'DELETE'}); await refresh(); }); }}><Trash2 size={16} aria-hidden="true" /></button> : null}</div>)}</div></section> : null}
+            </> : project.project_type === 'heritage' ? <HeritageWorkspace key={project.id} project={project} projects={projects.filter(item => !item.archived)} readonly={readonly} working={working} onUpdated={updateProject} onWorkingChange={setWorking} story={wizard} /> : wizard()}
           </div>
         </div>
         {me.trial_mode ? <footer className="mt-12 border-t pt-5 text-xs text-neutral-500 flex flex-wrap justify-between gap-4"><p>素材与结果在组内共享。模型会处理本次任务所需的内容；请使用有权提供的素材。</p><button type="button" disabled={busy || working || Boolean(me.trial_mode && me.ended)} onClick={() => { if (window.confirm('结束本轮试用？之后仅可查看下载，7天后素材到期清理。')) void perform(async () => { await api('/end-trial', { method: 'POST' }); await refresh(); }); }} className="underline disabled:opacity-35">{me.ended ? '试用已结束，保留期内可下载' : '结束我的试用（开始7天保留期）'}</button></footer> : null}

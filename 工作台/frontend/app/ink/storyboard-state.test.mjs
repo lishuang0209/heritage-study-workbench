@@ -4,6 +4,12 @@ import { newShotFields, reconcileShotFields, shotFields, shotFieldsChanged, stor
 
 const shot = () => ({ id: 's1', content: '新保存的画面', scene: '古寺门前', camera: '中景', motion: '递伞', character_ids: ['c1'], scene_id: 'scene1', prop_ids: ['prop1'], dialogues: [{ character_id: 'c1', text: '请用伞' }], image_draft: { shot: { content: '旧候选的画面' } } });
 const project = () => ({ characters: [{ id: 'c1' }, { id: 'c2' }], shots: [shot()], creative_settings: { scenes: [{ id: 'scene1', name: '古寺门前' }], props: [{ id: 'prop1', name: '油纸伞' }] } });
+test('heritage can edit draft material references before visual settings are confirmed', () => {
+  const p=project();p.project_type='heritage';p.creative_draft=p.creative_settings;p.creative_settings=null;
+  assert.equal(newShotFields(p).scene_id,'scene1');
+  assert.equal(reconcileShotFields(p,shot()).scene_id,'scene1');
+  assert.deepEqual(reconcileShotFields(p,shot()).prop_ids,['prop1']);
+});
 
 test('editing uses saved fields, excludes generation metadata and never mutates source', () => {
   const original = shot();

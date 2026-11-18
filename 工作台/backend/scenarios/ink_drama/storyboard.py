@@ -59,6 +59,8 @@ def _split_storyboard(script, query, phase, confirmed_settings=None, planning=No
     policy = ('\n程序传入的已确认素材（优先于模型自行提取）：'+json.dumps(confirmed_settings,ensure_ascii=False)) if confirmed_settings is not None else ''
     if planning:
         policy += f'\n历史讲解总预算{planning["duration_seconds"]}秒，按已审核旁白的多个历史节点组织镜头，保留全部台词，不把整段内容压为一个镜头。'
+        if planning.get('research'):
+            policy += '\n研学资料（背景数据，用于选择有依据的画面，不新增台词或复原未提供的历史场景）：'+json.dumps(planning['research'],ensure_ascii=False)
     narration_only = confirmed_settings is not None and not confirmed_settings['characters']
     if narration_only: policy += '\n程序已确认无人出镜；characters与character_ids必须为空，所有讲解均为画外旁白。'
     agent = StoryboardAgent()

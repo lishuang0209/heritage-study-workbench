@@ -215,3 +215,12 @@
 .ink-page .ink-next-step strong { font-size: 14px; font-weight: 600; }
 .ink-page .ink-shot-card, .ink-page .ink-final-card { scroll-margin-top: 24px; }
 @media(max-width: 680px) { .ink-page .ink-next-step { align-items: flex-start; flex-direction: column; } }
+
+.ink-page .ink-recent-icon img { width:100%; height:100%; object-fit:cover; border-radius:inherit; }
+
+.ink-page .ink-example-media img { width:100%; height:100%; position:absolute; inset:0; object-fit:cover; }
+
+.ink-page .ink-recent-item { position:relative; min-width:0; }
+.ink-page .ink-recent-item .ink-recent-card { width:100%; height:100%; padding-right:48px; }
+.ink-page .ink-recent-remove { position:absolute; right:10px; top:50%; transform:translateY(-50%); display:flex; align-items:center; justify-content:center; width:32px; height:32px; border-radius:8px; color:var(--lp-text-muted); }
+.ink-page .ink-recent-remove:hover { background:var(--lp-surface-soft); color:var(--lp-text-strong); }

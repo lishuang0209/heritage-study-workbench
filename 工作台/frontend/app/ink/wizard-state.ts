@@ -1,5 +1,14 @@
 import type { Project, Shot } from './ink-shared';
 export const wizardSteps = ['剧本', '创作设定', '分镜', '画面', '视频', '成片'];
+const studySteps = ['剧本', '分镜', '素材与画风', '画面', '视频', '成片'];
+export const wizardStepsFor = (p: Project) => p.project_type === 'heritage' ? studySteps : wizardSteps;
+export const setupStageFor = (p: Project) => p.project_type === 'heritage' ? 2 : 1;
+export const storyboardStageFor = (p: Project) => p.project_type === 'heritage' ? 1 : 2;
+export const wizardStorageKey = (p: Project) => `ink.wizard.${p.project_type === 'heritage' ? 'v3' : 'v2'}.${p.id}`;
+export function restoredWizardStage(p: Project, saved: number | undefined, legacy = false) {
+  const mapped = legacy && p.project_type === 'heritage' ? saved === 1 ? 2 : saved === 2 ? 1 : saved : saved;
+  return resumeStage(p, mapped);
+}
 export const imageReady = (s: Shot) => Boolean(s.image_url && !s.image_stale);
 export function imageGenerationPlan(shot:Pick<Shot,'image_url'|'image_stale'>,number?:number):{label:string;mode:'direct'|'preview'} {
   if(shot.image_url)return {label:shot.image_stale?'按新分镜重新生成':'重新生成图片',mode:'preview'};
@@ -19,8 +28,13 @@ export function missingCharacters(p: Project) {
 }
 export function unlockedStage(p: Project) {
   if (!p.story_confirmed && !p.shots.length) return 0;
-  if (!p.creative_settings) return 1;
-  if (!p.shots.length || !p.storyboard_confirmed) return 2;
+  if (p.project_type === 'heritage') {
+    if (!p.shots.length || !p.storyboard_confirmed || p.heritage_story_stale) return 1;
+    if (!p.creative_settings || p.creative_draft) return 2;
+  } else {
+    if (!p.creative_settings) return 1;
+    if (!p.shots.length || !p.storyboard_confirmed) return 2;
+  }
   if (!p.shots.every(imageReady)) return 3;
   if (!p.shots.every(soundReady)) return 4;
   return 5;

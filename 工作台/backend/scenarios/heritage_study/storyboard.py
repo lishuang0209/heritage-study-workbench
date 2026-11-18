@@ -3,8 +3,9 @@ import json
 import math
 import re
 
-from scenarios.ink_drama.domain import ShotInput, UserError, board, parse_json
-from .visual_plan import visual_briefs, differentiated_content, differentiated_motion
+from scenarios.ink_drama.domain import ShotInput, UserError, board
+from .research_plan import ENGINE, analyze_research, reconstruct_visuals
+from .visit_route import LABELS
 
 
 def narration_nodes(text, seconds):
@@ -15,8 +16,16 @@ def narration_nodes(text, seconds):
     for sentence in sentences:
         sentence = sentence.strip()
         while len(sentence) > 54:
-            cut = max(sentence.rfind('，', 12, 54), sentence.rfind('；', 12, 54)) + 1
-            if cut < 12: cut = 54
+            # Imported documents often use ASCII punctuation; prefer a real
+            # clause boundary instead of splitting words such as 木结构.
+            pauses = [match.end() for match in re.finditer(r'[，,；;：:]', sentence[:54]) if match.end() >= 12]
+            cut = pauses[-1] if pauses else 54
+            if len(sentence)-cut < 12:
+                earlier = [position for position in pauses if len(sentence)-position >= 12]
+                if earlier:
+                    cut = earlier[-1]
+                elif len(sentence) <= 90:
+                    break
             nodes.append(sentence[:cut]); sentence = sentence[cut:]
         if sentence: nodes.append(sentence)
     if not nodes: raise UserError('历史旁白为空，请先在研学脚本中填写并保存')
@@ -31,8 +40,18 @@ def narration_nodes(text, seconds):
     return nodes
 
 
-def allocate_seconds(nodes, seconds):
-    durations = [2] * len(nodes)
+def allocate_seconds(nodes, seconds, speed=.95):
+    # Budget each spoken line independently, including pauses and the clip ending.
+    durations = []
+    for text in nodes:
+        units = sum(char.isalnum() for char in text)
+        pauses = len(re.findall(r'[，,。！？；;：:]', text))
+        estimate = (units / 4 + pauses * .15) / speed + .25
+        durations.append(max(2, math.ceil(estimate)))
+    if max(durations) > 15:
+        raise UserError('单句旁白预计超过15秒，请在研学脚本中分句后再拆分镜')
+    if sum(durations) > seconds:
+        raise UserError(f'按当前旁白语速，历史段预计至少需要{sum(durations)}秒，当前为{seconds}秒。请延长历史段或精简旁白后再拆分镜')
     weights = [max(4, len(text)) for text in nodes]
     for _ in range(seconds-sum(durations)):
         available = [i for i, duration in enumerate(durations) if duration < 15]
@@ -42,56 +61,56 @@ def allocate_seconds(nodes, seconds):
     return durations
 
 
-def history_board(text, query, settings, seconds):
+def history_board(text, query, settings, seconds, *, research=None, progress=None, speed=.95):
     if type(seconds) is not int or not 3 <= seconds <= 180:
         raise UserError('历史段时长需为3至180秒的整数')
-    if settings.get('characters'):
-        raise UserError('历史旁白专用分镜仅适用于已确认无人出镜的项目')
+    guide=(research or {}).get('guide') or {}
+    from .guide import character
+    if settings.get('characters') and not character(settings,guide):
+        raise UserError('参观路线分镜请使用无人讲解或已启用的小向导')
     scenes = settings.get('scenes') or []
     if not scenes: raise UserError('请先确认历史讲解使用的建筑场景')
     nodes = narration_nodes(text, seconds)
     if any(len(words)>300 for words in nodes):
         raise UserError('当前历史时长不足以安排完整旁白，请增加历史段时长后再拆分镜；本次未调用模型')
-    durations = allocate_seconds(nodes, seconds)
-    briefs = visual_briefs(nodes,settings)
+    durations = allocate_seconds(nodes, seconds, speed)
+    report=progress or (lambda message,completed,total:None)
+    report('正在解析研学资料',0,3)
+    analysis = analyze_research(text,research,query)
+    report(f'资料已解析，正在规划{len(nodes)}个分镜的画面与运镜',1,3)
+    briefs = reconstruct_visuals(nodes,durations,analysis,settings,research,query)
+    report('正在核对旁白、时长与素材引用',2,3)
+    return compose_board(nodes,durations,analysis,briefs,settings,guide=guide)
+
+
+def compose_board(nodes,durations,analysis,briefs,settings,*,guide=None):
+    """Materialize a reviewed plan without generating or replacing any media."""
+    scenes=settings['scenes']
+    facts = {fact['id']:fact for fact in analysis['facts']}
     shots = []
     for index, (words, duration) in enumerate(zip(nodes, durations)):
         brief=briefs[index]
-        allowed={**settings,'props':[item for item in settings.get('props',[]) if item['id'] in brief['prop_ids']]}
-        prompt = ('为古建研学历史讲解规划一个水墨镜头，只设计画面，不起草或改写旁白。'
-                  '已确认无人出镜，不画讲解员、僧人、工匠或学生，不把旁白当作人物；不补造古代事件现场或未经核实的建筑复原。'
-                  '每个历史节点对应不同的观察角度，可使用建筑整体、梁架、已确认构件和环境细节；不能用无关画面凑镜头。'
-                  '实拍只约束可见形制，后续实物观察使用真实照片；不得将当前外观全部称为北宋原构。'
-                  '首帧content写静态起点，motion仅写局部环境变化或平缓运镜，不切镜、不新增人物。'
-                  '只输出一个JSON对象：{"content":"首帧画面","scene_id":"已确认场景编号","motion":"动作或运镜"}。'
-                  '不返回角色、台词、时长或数组；景别与素材引用由分工表确定，程序使用已审核的旁白原文。'
-                  f'\n本镜：{index+1}/{len(nodes)}，{duration}秒。'
-                  '\n当前历史节点：'+(words or '讲解后的建筑静观，不增加台词')+
-                  '\n本镜必须遵守的画面分工：'+json.dumps(brief,ensure_ascii=False)+
-                  '\n全片画面分工（保持各镜主体、景别、角度的变化）：'+json.dumps(briefs,ensure_ascii=False)+
-                  '\n已完成的前镜（不要重复其主体大小、角度及构图）：'+json.dumps([{key:shot[key] for key in ('content','camera','prop_ids')} for shot in shots[-2:]],ensure_ascii=False)+
-                  '\n完整已审核旁白：'+text+'\n本镜可用素材：'+json.dumps(allowed,ensure_ascii=False))
-        raw = parse_json(query(prompt))
-        if isinstance(raw, dict) and isinstance(raw.get('shots'), list) and len(raw['shots']) == 1:
-            raw = raw['shots'][0]
-        if not isinstance(raw, dict): raise UserError(f'第{index+1}镜画面规划格式错误，原镜头保留')
-        scene = next((item for item in scenes if item['id'] == raw.get('scene_id')), None)
-        if scene is None and len(scenes) == 1: scene = scenes[0]
-        if scene is None: raise UserError(f'第{index+1}镜未选择已确认的建筑场景')
-        props=brief['prop_ids']
-        shot = ShotInput.model_validate(dict(
-            duration=duration, content=differentiated_content(raw,brief,shots[-1] if shots else None), scene=scene['name'], scene_id=scene['id'],
-            camera=brief['camera'], motion=differentiated_motion(raw,brief), prop_ids=props,
-            character_ids=[], dialogues=[dict(character_id='narrator', text=words)] if words else [],
+        scene=next(item for item in scenes if item['id']==brief['scene_id'])
+        shot=ShotInput.model_validate(dict(
+            duration=duration,content=brief['visual'].strip(),scene=scene['name'],scene_id=scene['id'],
+            camera=brief['camera'],motion=brief['motion'].strip() or '固定机位，保持本镜主体与构图。',prop_ids=brief['prop_ids'],character_ids=[],
+            dialogues=[dict(character_id='narrator',text=words)] if words else [],
         )).model_dump()
         shots.append(shot)
     result = board(json.dumps(dict(characters=[], shots=shots), ensure_ascii=False))
     segments = []
     for index, shot in enumerate(result['shots']):
-        shot.update(source_segment=index+1, source_shot=1, generation_unit='shot')
+        shot.update(source_segment=index+1, source_shot=1, generation_unit='shot',
+                    study_topic=briefs[index]['topic'],research_evidence=[facts[fid] for fid in briefs[index]['fact_ids']],
+                    study_visit=dict(stage=briefs[index]['visit_stage'],label=LABELS[briefs[index]['visit_stage']],
+                                     space=briefs[index]['view_space'],viewpoint=briefs[index]['viewpoint']))
         segments.append(dict(segment_id=f'history_{index+1}', segment_number=index+1,
                              episode_number=1, location=shot['scene'], characters=[], total_duration=shot['duration'],
                              shots=[dict(shot_number=1,shot_type=shot['camera'],duration=shot['duration'],content=shot['motion'])]))
     result.update(storyboard_plan=segments, storyboard_episodes=[dict(episode_number=1,segments=segments)],
-                  storyboard_visual_plan=briefs,storyboard_engine='heritage-history-facts-v2')
+                  storyboard_analysis=analysis,storyboard_visual_plan=briefs,storyboard_engine=ENGINE)
+    if guide and guide.get('enabled'):
+        from .guide import guided_board
+        result=guided_board(result,settings,guide)
+        result['creative_draft']=settings
     return result

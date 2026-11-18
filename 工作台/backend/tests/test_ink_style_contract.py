@@ -54,8 +54,13 @@ def test_video_keeps_framing_and_painterly_detail_at_close_range(key):
     prompt = video_prompt(p, '书生接过油纸伞')
     assert '禁止自行快速拉近、推镜、变焦、裁切放大' in prompt
     assert '焦距、取景范围与人物画面占比保持首帧状态' in prompt
-    assert '人物面部、手部、衣料和伞等道具' in prompt
+    assert '人物面部、手部、衣料和本镜已有道具' in prompt
     assert '即使明确要求拉近或近景' in prompt
     explicit = video_prompt(p, '运镜与构图：缓慢推近手部')
     assert '运镜与构图：缓慢推近手部' in explicit
     assert '按指定速度平滑完成' in explicit
+
+
+def test_unmanned_video_omits_story_prop_examples():
+    prompt = video_prompt({'heritage_empty_cast_video': True}, '固定仰视藻井')
+    assert '无人建筑' in prompt and '固定仰视藻井' in prompt and '伞' not in prompt

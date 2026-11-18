@@ -6,6 +6,7 @@ from scenarios.heritage_study.visual_plan import visual_briefs
 from scenarios.ink_drama.domain import framing_constraint
 from test_heritage_history import settings
 from test_ink_demo import api,setup
+from heritage_planner_fixtures import planner_reply
 
 
 def narration():
@@ -28,22 +29,21 @@ def test_repeated_topic_alternates_composition_instead_of_repeating_second_varia
     assert all(a['camera']!=b['camera'] for a,b in zip(briefs,briefs[1:]))
 
 
-def test_history_design_sees_neighbors_and_corrects_repeated_model_closeups_without_extra_calls():
+def test_history_design_uses_whole_film_plan_instead_of_keyword_templates():
     prompts=[]
     def query(prompt):
         prompts.append(prompt)
-        return json.dumps(dict(content='层叠斗拱的局部特写，木纹细节清楚',scene_id='temple',camera='中景偏全景',motion='缓缓推近斗拱',prop_ids=['undefined']))
-    result=history_board(narration(),query,settings(),30)
-    assert len(prompts)==len(result['shots'])==6
-    assert '已完成的前镜' in prompts[4] and '全片画面分工' in prompts[4]
-    assert 'repair' in prompts[4] and 'protection' in prompts[4]
-    fourth,fifth,sixth=result['shots'][3:6]
-    assert fourth['camera'].startswith('特写') and fifth['camera'].startswith('全景')
-    assert fifth['prop_ids']==[] and '完整屋顶' in fifth['content']
-    assert '缓缓推近斗拱' not in fifth['motion']
-    assert sixth['content']!=fourth['content'] and sixth['camera'].startswith('中景')
+        return planner_reply(prompt)
+    result=history_board(narration(),query,settings(),45)
+    assert len(prompts)==2
+    assert prompts[0].startswith('阶段1：') and prompts[1].startswith('阶段2：')
+    assert 'analysis' in prompts[-1] and 'narration' in prompts[-1]
+    assert len({s['camera'] for s in result['shots']})>=3
+    assert len({s['content'] for s in result['shots']})==len(result['shots'])
+    assert result['storyboard_analysis']['facts']
+    assert all(s['study_topic'] and s['research_evidence'] for s in result['shots'])
     assert ''.join(line['text'] for shot in result['shots'] for line in shot['dialogues'])==narration()
-    assert sum(shot['duration'] for shot in result['shots'])==30
+    assert sum(shot['duration'] for shot in result['shots'])==45
 
 
 def test_unmanned_wide_framing_has_architecture_rules_without_body_cropping():

@@ -363,12 +363,40 @@ REFERENCE_PRESETS = {
 }
 
 
-def add_shot_sound(p, s, user, folder, stem):
+def prepare_shot_lines(p, s, user, folder, stem):
+    from scenarios.heritage_study.narration import speak
+    pid = p['id']
+    duration_seconds = s.get('duration') or 5
+    lines, total = [], 0.0
+    for i, d in enumerate(s['dialogues']):
+        target = folder / (stem + f'-{i}.mp3')
+        voice = (p.get('voices') or {}).get(d['character_id'], VOICES.get(d['character_id'], VOICES['c1']))
+        if p.get('project_type') == 'heritage' and d['character_id'] == NARRATOR:
+            call(user, 'speech', pid, lambda d=d, target=target: speak(providers, p, d['text'], target))
+        else:
+            call(user, 'speech', pid, lambda d=d, target=target, voice=voice: providers.speak(d['text'], voice, target))
+        duration = providers.duration(target)
+        remaining = duration_seconds - total
+        excess = round(duration - remaining, 6)
+        if excess > 0:
+            if (i == len(s['dialogues']) - 1 and remaining > 0 and excess <= 1 / 24
+                    and providers.silent_after(target, remaining)):
+                duration = remaining
+            else:
+                measured = f'{total + duration:.2f}'.rstrip('0').rstrip('.')
+                raise UserError(f'本镜头配音累计{measured}秒，超过{duration_seconds}秒。请延长镜头或精简台词')
+        total += duration
+        lines.append((d['text'], duration, target))
+    return lines
+
+
+def add_shot_sound(p, s, user, folder, stem, prepared_lines=None):
+    from scenarios.heritage_study.narration import narrated_shot, profile
     pid = p['id']
     if not s.get('clip') or s.get('clip_stale'):
         raise UserError('请先更新该镜头的独立视频片段')
     has_audio = getattr(providers, 'has_audio', None)
-    if has_audio and has_audio(store.asset(pid, s['clip'])):
+    if not narrated_shot(p, s) and has_audio and has_audio(store.asset(pid, s['clip'])):
         if s.get('rendered') and s['rendered'] != s['clip']:
             versions = s.setdefault('rendered_versions', [])
             if s['rendered'] not in versions:
@@ -377,16 +405,7 @@ def add_shot_sound(p, s, user, folder, stem):
         p['final_stale'] = bool(p.get('final'))
         return
     duration_seconds = s.get('duration') or 5
-    lines, total = [], 0.0
-    for i, d in enumerate(s['dialogues']):
-        target = folder / (stem + f'-{i}.mp3')
-        voice = (p.get('voices') or {}).get(d['character_id'], VOICES.get(d['character_id'], VOICES['c1']))
-        call(user, 'speech', pid, lambda d=d, target=target, voice=voice: providers.speak(d['text'], voice, target))
-        duration = providers.duration(target)
-        total += duration
-        lines.append((d['text'], duration, target))
-        if total > duration_seconds:
-            raise UserError(f'本镜头配音累计{total:.1f}秒，超过{duration_seconds}秒。请缩短台词，确认后手动重新生成；原视频已保留')
+    lines = prepared_lines if prepared_lines is not None else prepare_shot_lines(p, s, user, folder, stem)
     target = folder / (stem + '-sound.mp4')
     providers.render(store.asset(pid, s['clip']), lines, folder, target, duration_seconds=duration_seconds, **generation_options(p))
     versions = s.setdefault('rendered_versions', [])
@@ -394,6 +413,8 @@ def add_shot_sound(p, s, user, folder, stem):
         if name and name not in versions:
             versions.append(name)
     s.update(rendered=target.name, rendered_stale=False, media_step='complete', audio_source='tts')
+    if narrated_shot(p, s):
+        s['narration_profile'] = profile(p)
     p['final_stale'] = bool(p.get('final'))
 
 
@@ -407,23 +428,36 @@ def run_job(jid, pid, user, action, sid, preset=None):
             p['creative_draft'] = call(user, 'text', pid, lambda: providers.extract_settings(p['script'] + '\n项目背景规则：' + background_context(p, include_references=True)))
         elif action == 'split':
             script = p['script'] + '\n项目背景规则：' + background_context(p) + '\n' + NARRATION_RULE
-            if p.get('creative_settings'):
-                script += '\n已确认设定（角色ID、场景scene_id、道具prop_ids必须使用这些编号，不另造设定）：' + json.dumps(p['creative_settings'], ensure_ascii=False)
+            settings = p.get('creative_settings')
+            if p.get('project_type') == 'heritage':
+                from scenarios.heritage_study.workflow import planning_settings
+                settings = planning_settings(p)
+            if settings:
+                label = ('素材目录（角色ID、场景scene_id、道具prop_ids必须使用这些编号，不另造设定；画风与参考图可在分镜确认后调整）：'
+                         if p.get('project_type') == 'heritage' else '已确认设定（角色ID、场景scene_id、道具prop_ids必须使用这些编号，不另造设定）：')
+                script += '\n' + label + json.dumps(settings, ensure_ascii=False)
             script += PLANNING_MARKER + planning_context(p)
-            options = {'settings': p['creative_settings']} if p.get('creative_settings') else {}
+            options = {'settings': settings} if settings else {}
             if p.get('project_type') == 'heritage':
                 from scenarios.heritage_study.timing import timing_for
-                options['planning'] = dict(kind='heritage-history',duration_seconds=timing_for(p)['intro'],narration=p['script'])
+                from scenarios.heritage_study.workflow import planning_research
+                from scenarios.heritage_study.narration import profile
+                options['planning'] = dict(speech_speed=profile(p)['speed'],kind='heritage-history',duration_seconds=timing_for(p)['intro'],narration=p['script'],research=planning_research(p))
+                options['progress'] = lambda message,completed,total: store.progress(jid,message,completed,total)
             data = call(user, 'text', pid, lambda: providers.split(script, **options))
             if p.get('project_type') == 'heritage':
                 data['heritage_story_source'] = p['script']
-            if p.get('creative_settings'):
-                data['characters'] = p['creative_settings']['characters']
+                from scenarios.heritage_study.workflow import planning_fingerprint
+                data['heritage_story_research_stamp'] = planning_fingerprint(p)
+            if settings:
+                data['characters'] = settings['characters']
                 for item in data['shots']:
                     if not item.get('scene_id'):
-                        match = next((x for x in p['creative_settings']['scenes'] if x['name'] == item['scene']), None)
+                        match = next((x for x in settings['scenes'] if x['name'] == item['scene']), None)
                         if match: item['scene_id'] = match['id']
-                    check_references(p['creative_settings'], item)
+                    check_references(settings, item)
+            if p.get('project_type') == 'heritage' and not p.get('creative_settings'):
+                data['creative_draft'] = settings
             if p['shots']:
                 p['storyboard_draft'] = data
             else:
@@ -431,6 +465,8 @@ def run_job(jid, pid, user, action, sid, preset=None):
                 if p.get('project_type') == 'heritage': p['heritage_story_stale']=False
                 p['storyboard_confirmed'] = False
         elif action in {'image', 'reference'}:
+            from scenarios.heritage_study.guide import require_reference
+            require_reference(p,s,store)
             first = p['shots'][0]['id'] == sid
             if action == 'image' and not first and not p.get('baseline') and not p.get('creative_settings'):
                 raise UserError('请先分析首张图并确认锁定人物与画风')
@@ -450,7 +486,8 @@ def run_job(jid, pid, user, action, sid, preset=None):
                     reference['ink_style'].update(REFERENCE_PRESETS[preset])
                 prompt_project['baseline'] = reference
             prompt = frame_prompt(prompt_project, s)
-            prompt, refs = with_style_reference(prompt_project, prompt, refs, asset_group='frames')
+            from scenarios.heritage_study.material_views import frame_style_references
+            prompt, refs = frame_style_references(prompt_project,prompt,refs,with_style_reference,shot=s)
             prompt, refs = with_spatial_reference(p, s, prompt, refs, store)
             generated = call_image(user, pid, prompt, refs, folder)
             target = folder / (stem + '.png')
@@ -459,6 +496,7 @@ def run_job(jid, pid, user, action, sid, preset=None):
             remember_image(s, s.get('image'), None if s.get('image_stale') else {k: s.get(k, 5 if k == 'duration' else [] if k == 'prop_ids' else None) for k in ShotInput.model_fields}, s.get('used_prompt', ''))
             invalidate(p, s)
             s.update(image=target.name, image_stale=False, used_prompt=prompt,
+                     image_reference_images=[Path(ref).name for ref in refs],
                      image_baseline_version=p['baseline']['version'] if action == 'image' and p.get('baseline') else None)
             s['image_versions'].append(target.name)
             remember_image(s, target.name, {k: s.get(k, 5 if k == 'duration' else [] if k == 'prop_ids' else None) for k in ShotInput.model_fields}, s.get('used_prompt', ''))
@@ -492,6 +530,8 @@ def run_job(jid, pid, user, action, sid, preset=None):
                 motion = re.sub(r'^\s*(?:大特写|特写|近景|中近景|中景|全景|远景)[，,、：:\s]+', '', motion)
             # Shot camera describes only the still first frame, never every video shot.
             camera = video_settings.get('camera', '')
+            from scenarios.heritage_study.guide import entrance_motion
+            motion = entrance_motion(p, s, motion, camera, mode)
             if camera:
                 motion += '\n运镜与构图：' + camera
             if mode == 'reference':
@@ -499,18 +539,30 @@ def run_job(jid, pid, user, action, sid, preset=None):
                 items = [x for x in settings.get('characters', []) if x['id'] in s['character_ids']]
                 items += [x for x in settings.get('scenes', []) if x['id'] == s.get('scene_id')]
                 labels = []
-                for item in items:
-                    path = str(store.asset(pid, item['image']))
-                    labels.append(f"参考图{references.index(path)+1}：{item['name']}，{item['desc']}")
+                from scenarios.heritage_study.visit_route import interior_view
+                interior=p.get('project_type')=='heritage' and interior_view(s)
+                if interior:labels.append('参考图1：已确认的内部首帧，保持其空间、构件、画风和机位，不切回外立面。')
+                for item in ([] if interior else items):
+                    from scenarios.heritage_study.material_views import material_reference
+                    path = material_reference(p,s,item,store)
+                    if path in references:labels.append(f"参考图{references.index(path)+1}：{item['name']}，{item['desc']}")
                 for path in spatial_reference_paths(p, s, store):
                     labels.append(f"参考图{references.index(path)+1}：本场空间参考，参考人物与场景地标的关系，不复制画面左右、机位或动作")
                 motion = '\n'.join(labels) + '\n遵循参考图的人物外貌、服饰与场景。画面安排：' + s['content'] + '\n依次执行：\n' + motion
             else:
                 motion = '从输入图的实际状态开始，只执行以下动作：\n' + motion
-            motion += '\n' + spatial_prompt(p, s, video=True)
+            empty_cast = p.get('project_type') == 'heritage' and not s['character_ids']
+            if not empty_cast:
+                motion += '\n' + spatial_prompt(p, s, video=True)
             if video_model(mode).startswith('wan2.7'):
-                motion += '\n' + native_dialogue_prompt(p['characters'], s['dialogues'])
-            call(user, 'video', pid, lambda: providers.video(store.asset(pid, s['image']), motion, target, project=p, duration_seconds=duration_seconds, **({'mode': mode, 'last_image': last_image, 'references': references} if mode != 'first_frame' else {})))
+                from scenarios.heritage_study.narration import narrated_shot
+                if narrated_shot(p, s) and all(d['character_id']==NARRATOR for d in s['dialogues']):
+                    motion += '\n仅生成画面和环境声，不生成人声、讲解或音乐；统一旁白将在后期添加。'
+                else:
+                    motion += '\n' + native_dialogue_prompt(p['characters'], s['dialogues'])
+            from scenarios.heritage_study.narration import narrated_shot
+            prepared_lines = prepare_shot_lines(p, s, user, folder, stem) if narrated_shot(p, s) else None
+            call(user, 'video', pid, lambda: providers.video(store.asset(pid, s['image']), motion, target, project={**p, 'heritage_empty_cast_video': True} if empty_cast else p, duration_seconds=duration_seconds, **({'mode': mode, 'last_image': last_image, 'references': references} if mode != 'first_frame' else {})))
             actual = providers.duration(target)
             if abs(actual - duration_seconds) > 0.3:
                 raise UserError(f'视频未返回约{duration_seconds}秒片段，请核对模型；原结果保留')
@@ -523,7 +575,7 @@ def run_job(jid, pid, user, action, sid, preset=None):
             s['media_step'] = 'sound'
             store.save(p)
             try:
-                add_shot_sound(p, s, user, folder, stem)
+                add_shot_sound(p, s, user, folder, stem, prepared_lines)
             except Exception as exc:
                 reason = str(exc) if isinstance(exc, UserError) else '配音或字幕处理失败，请检查配音服务连接后重试。'
                 raise UserError('视频已生成并保留，配音字幕未完成。' + reason) from exc
@@ -545,6 +597,8 @@ def run_job(jid, pid, user, action, sid, preset=None):
             p['final_versions'].append(target.name)
         store.save(p)
         store.event(pid, user['id'], action, {'shot': sid})
+        if action=='split' and p.get('project_type')=='heritage':
+            store.progress(jid,'新分镜已保存',3,3)
         store.finish(jid)
     except Exception as exc:
         # Do not expose SDK errors (which can contain endpoints/credentials) to clients.
@@ -599,8 +653,23 @@ def list_projects(user=Depends(identity)):
     for p in store.list():
         if user.get('trial_mode', True) and store.ended(p['owner']) and __import__('time').time() >= store.ended(p['owner']) + 7 * 86400:
             continue
-        items.append({**{k: p[k] for k in ('id', 'owner', 'title', 'created_at')}, 'project_type': p.get('project_type', 'ink')})
+        shots = p.get('shots') or []
+        image = shots[0].get('image') if shots else None
+        items.append({**{k: p[k] for k in ('id', 'owner', 'title', 'created_at')},
+                      'project_type': p.get('project_type', 'ink'),
+                      'archived': bool(p.get('archived')),
+                      'cover_url': f'/api/ink/projects/{p["id"]}/assets/{image}' if image else None})
     return {'projects': items}
+
+
+@router.delete('/projects/{pid}')
+@serialized
+def archive_project(pid: str, user=Depends(identity)):
+    p = access(pid, user, True)
+    p['archived'] = True
+    store.save(p)
+    store.event(pid, user['id'], 'archive_project', {})
+    return {'ok': True}
 
 
 @router.post('/projects')
@@ -696,13 +765,19 @@ def video_inputs(p, shot, mode, end_shot_id=None):
             raise UserError('尾帧图片不存在，请重新生成或上传')
         return path, []
     if mode == 'reference':
+        from scenarios.heritage_study.visit_route import interior_view
+        if p.get('project_type')=='heritage' and interior_view(shot):
+            path=store.asset(p['id'],shot['image'])
+            if not path.is_file():raise UserError('内部首帧图片不存在，请先生成并确认画面')
+            return None,[str(path)]
         settings = p.get('creative_settings') or {}
         items = [x for x in settings.get('characters', []) if x['id'] in shot['character_ids']]
         items += [x for x in settings.get('scenes', []) if x['id'] == shot.get('scene_id')]
         if len(items) != len(shot['character_ids']) + bool(shot.get('scene_id')) or not items or any(not x.get('image') for x in items):
             raise UserError('请先为本片段引用的角色和场景生成并确认图片')
         check_material_styles(p, items)
-        paths = list(dict.fromkeys(str(store.asset(p['id'], x['image'])) for x in items))
+        from scenarios.heritage_study.material_views import material_reference
+        paths = list(dict.fromkeys(material_reference(p,shot,x,store) for x in items))
         if any(not Path(x).is_file() for x in paths):
             raise UserError('角色或场景参考图文件不存在，请更新素材')
         paths = list(dict.fromkeys(paths + spatial_reference_paths(p, shot, store)))
@@ -762,6 +837,9 @@ def add_shot(pid: str, body: ShotInput, user=Depends(identity)):
             raise UserError('台词角色必须在本镜头出场')
         if p.get('creative_settings'):
             check_references(p['creative_settings'], data)
+        elif p.get('project_type') == 'heritage':
+            from scenarios.heritage_study.workflow import check_board_references
+            check_board_references(p, data)
         elif data['scene_id'] is not None or data['prop_ids']:
             raise UserError('请先在创作设定中确认场景和道具')
     except ValueError as exc:
@@ -801,6 +879,9 @@ def edit_shot(pid: str, sid: str, body: ShotInput, user=Depends(identity)):
             raise UserError('台词角色必须在本镜头出场')
         if p.get('creative_settings'):
             check_references(p['creative_settings'], data)
+        elif p.get('project_type') == 'heritage':
+            from scenarios.heritage_study.workflow import check_board_references
+            check_board_references(p, data)
         changed = {key for key in ShotInput.model_fields
                    if data[key] != s.get(key, 5 if key == 'duration' else [] if key == 'prop_ids' else None)}
         if not changed:
@@ -851,8 +932,9 @@ def shot_restore_context(p, shot):
     """Only rendering dependencies; deletion itself never invalidates other shots."""
     references = ([Path(path).name for path in creative_refs(p, shot)] if p.get('creative_settings') else
                   (p.get('baseline') or {}).get('reference_images', []))
+    from scenarios.heritage_study.narration import profile
     return {'visual': {'prompt': frame_prompt(p, shot), 'references': references},
-            'voices': {d['character_id']: p.get('voices', VOICES).get(d['character_id'], VOICES['c1'])
+            'voices': {d['character_id']: profile(p)['voice'] if p.get('project_type') == 'heritage' and d['character_id'] == NARRATOR else (p.get('voices') or {}).get(d['character_id'], VOICES.get(d['character_id'], VOICES['c1']))
                        for d in shot['dialogues']}}
 
 
@@ -1087,15 +1169,22 @@ class VoiceChoice(BaseModel):
 def select_voices(pid: str, body: VoiceChoice, user=Depends(identity)):
     p = access(pid, user, True)
     known = {c['id'] for c in p['characters']}
-    if not known <= set(body.voices) <= known | {NARRATOR} or not set(body.voices.values()) <= set(VOICES.values()):
+    from scenarios.heritage_study.narration import VOICE_PROFILES, narrated_shot, profile
+    supported = set(VOICES.values()) | (set(VOICE_PROFILES) if p.get('project_type') == 'heritage' else set())
+    if not known <= set(body.voices) <= known | {NARRATOR} or not set(body.voices.values()) <= supported:
         raise HTTPException(422, '请为角色和旁白选择支持的预设音色')
-    old = p.get('voices', VOICES)
-    changed = {cid for cid, voice in body.voices.items() if old.get(cid) != voice}
+    old = {**VOICES, **(p.get('voices') or {})}
+    if p.get('project_type') == 'heritage': old[NARRATOR] = profile(p)['voice']
+    next_voices = {**VOICES, **body.voices}
+    if p.get('project_type') == 'heritage': next_voices[NARRATOR] = profile({'voices':body.voices})['voice']
+    changed = {cid for cid in old.keys() | next_voices.keys() if old.get(cid) != next_voices.get(cid)}
     p['voices'] = body.voices
     for shot in p['shots']:
-        if shot.get('audio_source') != 'original' and any(d['character_id'] in changed for d in shot['dialogues']):
+        if (shot.get('audio_source') != 'original' or narrated_shot(p, shot)) and any(d['character_id'] in changed for d in shot['dialogues']):
             shot['rendered_stale'] = bool(shot.get('rendered'))
             p['final_stale'] = bool(p.get('final'))
+    if p.get('project_type') == 'heritage' and NARRATOR in changed:
+        p['final_stale'] = bool(p.get('final'))
     store.save(p)
     store.event(pid, user['id'], 'edit_voices', {'characters': sorted(changed)})
     return public(p)
@@ -1160,6 +1249,8 @@ def run_preview(jid, pid, user, sid, request, stamp):
             check_frame_style(p, s)
             prompt, refs = detail_request(p, s, request['instruction'], store)
         else:
+            from scenarios.heritage_study.guide import require_reference
+            require_reference(p,draft,store)
             refs = creative_refs(p, draft)
             # No full storyboard image is used as a composition/pose reference.
             context = copy.deepcopy(p)
@@ -1168,7 +1259,8 @@ def run_preview(jid, pid, user, sid, request, stamp):
                 context['baseline']['characters'].extend(
                     {'character_id': c['id'], 'desc': c['desc']} for c in p['characters'] if c['id'] not in known)
             prompt = frame_prompt(context, draft)
-            prompt, refs = with_style_reference(context, prompt, refs, asset_group='frames')
+            from scenarios.heritage_study.material_views import frame_style_references
+            prompt, refs = frame_style_references(context,prompt,refs,with_style_reference,shot=draft)
             prompt, refs = with_spatial_reference(p, draft, prompt, refs, store)
         if request['mode'] != 'redesign':
             prompt += '\n' + spatial_prompt(p, draft)
@@ -1448,7 +1540,11 @@ def save_creative_settings(pid: str, body: CreativeSettings, user=Depends(identi
         remember_settings(p, p.get('creative_settings'))
         remember_settings(p, p.get('creative_draft'))
         remember_settings(p, data)
-        apply_settings(p, data)
+        if p.get('project_type') == 'heritage':
+            from scenarios.heritage_study.workflow import apply_materials
+            apply_materials(p, data)
+        else:
+            apply_settings(p, data)
         store.save(p)
         return public(p)
     except ValueError as exc:
@@ -1467,15 +1563,23 @@ def choose_storyboard_draft(pid: str, choice: str, user=Depends(identity)):
     if choice == 'adopt':
         if p.get('project_type') == 'heritage' and (p.get('heritage_story_stale') or draft.get('heritage_story_source') is not None) and draft.get('heritage_story_source') != p['script']:
             raise HTTPException(409, '历史脚本已更新，请根据当前旁白重新生成分镜')
-        if p.get('creative_settings'):
+        if p.get('project_type') == 'heritage' and draft.get('heritage_story_research_stamp'):
+            from scenarios.heritage_study.workflow import planning_fingerprint, refresh_draft_images
+            if draft['heritage_story_research_stamp'] != planning_fingerprint(p) and not refresh_draft_images(p, draft):
+                raise HTTPException(409, '研学资料、时长或素材已更新，请重新解析资料并生成分镜')
+        draft_settings=(draft.get('creative_draft') if p.get('project_type')=='heritage' else None) or p.get('creative_settings')
+        if draft_settings:
             try:
-                for shot in draft['shots']: check_references(p['creative_settings'], shot)
+                for shot in draft['shots']: check_references(draft_settings, shot)
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from exc
         p.setdefault('storyboard_history', []).append({
             'shots': p['shots'], 'characters': p['characters'],
-            'deleted_shots': p.get('deleted_shots', []), 'final': p.get('final')})
+            'deleted_shots': p.get('deleted_shots', []), 'final': p.get('final'),
+            'creative_settings':copy.deepcopy(p.get('creative_settings'))})
         p.update(draft)
+        if p.get('project_type')=='heritage' and draft.get('creative_draft'):
+            p['creative_settings']=copy.deepcopy(draft['creative_draft'])
         if p.get('project_type') == 'heritage': p['heritage_story_stale']=False
         # New IDs cannot collide with archived shots or their pending edits.
         for shot in p['shots']: shot['id'] = 's' + uuid.uuid4().hex
@@ -1491,10 +1595,14 @@ def choose_storyboard_draft(pid: str, choice: str, user=Depends(identity)):
 @serialized
 def confirm_storyboard(pid: str, user=Depends(identity)):
     p = access(pid, user, True)
-    if not p.get('creative_settings') or not p['shots']:
+    if not p['shots'] or (p.get('project_type') != 'heritage' and not p.get('creative_settings')):
         raise HTTPException(422, '请先确认创作设定并生成分镜')
     try:
-        for shot in p['shots']: check_references(p['creative_settings'], shot)
+        if p.get('project_type') == 'heritage':
+            from scenarios.heritage_study.workflow import confirm_board
+            confirm_board(p)
+        else:
+            for shot in p['shots']: check_references(p['creative_settings'], shot)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     p['storyboard_confirmed'] = True
@@ -1533,14 +1641,16 @@ def run_setting_image(jid, pid, user, data, group, asset_id, redesign=False, vie
     try:
         p = store.load(pid)
         item = next(x for x in data[group] if x['id'] == asset_id)
-        from scenarios.heritage_study.visual_reference import reference_plan, prepare_reference
+        from scenarios.heritage_study.visual_reference import reference_plan, prepare_reference, material_purpose, material_description
         heritage_plan = reference_plan(p, group, item)
+        guide_generation=p.get('project_type')=='heritage' and group=='characters' and asset_id==(p.get('heritage_guide') or {}).get('character_id')
         purpose = {'characters':'单个人物全身设定图，清楚展示脸部和发型；衣纹详略由所选画风决定，不要求全身精细描线。空白浅色背景，不添加其他人物，不额外安排手持器物，仅在人物描述明确要求时画该道具。只绘人物，不制作图鉴、服饰说明页或带标题的海报', 'scenes':'无人空场景设定图，只展示建筑、自然环境、光线和空间布局。人物数量为零；不画人物、手脚、剪影、人影或人物倒影，不表现递伞等剧情动作。描述中即使涉及人物活动也仅提取空间环境。留出之后放置角色的空间', 'props':'单个道具设定图，独立展示形状、材质和颜色，背景留白。人物数量为零，不画手持道具的手、人体局部、人物、剪影或人物倒影，不添加建筑和山水背景'}[group]
-        if heritage_plan and group == 'props':
-            purpose = '古建筑目标构件的水墨设定图，保留实拍可见形制与连接关系，背景简洁留白。人物数量为零，不画人物、手或人物倒影，不编造隐藏结构。'
+        if heritage_plan:
+            purpose = material_purpose(group)
         if group == 'characters' and view == 'sheet':
             purpose = '同一角色的正面、侧面、背面三视图设定图，浅色空白背景，无文字无印章，不添加其他角色或剧情动作。'
-        prompt = background_context(p)+'\n'+image_style({'creative_settings': data})+'\n'+purpose+'\n'+item['name']+'：'+item['desc']+'\n避免：'+negative_style({'creative_settings': data})
+        description=material_description(group,item['name'],item['desc']) if heritage_plan else item['desc']
+        prompt = background_context(p)+'\n'+image_style({'creative_settings': data})+'\n'+purpose+'\n'+item['name']+'：'+description+'\n避免：'+negative_style({'creative_settings': data})
         refs = []
         from .identity_reference import identity_source, portrait_reference
         source_name = identity_source(p, item) if group == 'characters' and not redesign else None
@@ -1572,18 +1682,20 @@ def run_setting_image(jid, pid, user, data, group, asset_id, redesign=False, vie
         heritage_reference = None
         if heritage_plan:
             instruction, refs, heritage_reference = prepare_reference(p, store, heritage_plan)
-            # Subject-bearing style samples can override a real architectural target.
-            # Here the real photo controls form and image_style controls brushwork.
+            # Whole-building layouts come from research, not a cropped field
+            # photo or a style sample depicting an unrelated subject.
             prompt = instruction + '\n' + prompt
+        elif guide_generation:
+            prompt += '\n这是教学虚构小向导的角色参考，只按当前人物描述与选定水墨画风设计。服饰年代仅约束人物，不画建筑复原。固定脸型、发髻数量、布巾形状、衣领、腰带与服装固有色；不参考其他人物的身份、年龄或发型。'
         else:
             prompt, refs = with_style_reference({'creative_settings': data}, prompt, refs, asset_group=group)
-        generated = call_image(user, pid, prompt, refs, store.folder(pid), **({'ratio': '16:9'} if group == 'characters' and view == 'sheet' else {}))
+        generated = call_image(user, pid, prompt, refs, store.folder(pid), **({'ratio': '16:9'} if heritage_plan or group == 'characters' and view == 'sheet' else {}))
         name = uuid.uuid4().hex+'.png'
         with Image.open(generated) as img: img.convert('RGB').save(store.folder(pid)/name)
         remember_settings(p, p.get('creative_settings'))
         remember_settings(p, p.get('creative_draft'))
         remember_setting_image(p, group, item, data['style'])
-        p.setdefault('setting_generation_records', {})[name] = {'style': data['style'], 'prompt': prompt, 'references': [str(ref).replace('\\', '/').rsplit('/', 1)[-1] for ref in refs], 'group': group, 'asset_id': asset_id, 'identity_source': source_name, 'reference_mode': 'heritage-photo' if heritage_reference else 'portrait' if crop_path is not None else 'full' if source_name else 'text', **({'heritage_reference': heritage_reference} if heritage_reference else {})}
+        p.setdefault('setting_generation_records', {})[name] = {'style': data['style'], 'prompt': prompt, 'references': [str(ref).replace('\\', '/').rsplit('/', 1)[-1] for ref in refs], 'group': group, 'asset_id': asset_id, 'identity_source': source_name, 'reference_mode': 'heritage-research' if heritage_reference else 'portrait' if crop_path is not None else 'full' if source_name else 'text', **({'heritage_reference': heritage_reference} if heritage_reference else {})}
         if group == 'characters' and view in ('side', 'back'):
             item.setdefault('views', {})[view] = {'image': name, 'source': item['image'], 'style': data['style'], 'description': item['desc']}
         else:
@@ -1628,6 +1740,8 @@ def creative_refs(p, shot):
     items = [x for x in settings['characters'] if x['id'] in shot['character_ids']]
     items += [x for x in settings['scenes'] if x['id']==shot.get('scene_id')]
     items += [x for x in settings['props'] if x['id'] in shot.get('prop_ids',[])]
+    from scenarios.heritage_study.visit_route import compatible_reference
+    items = [item for item in items if compatible_reference(p,shot,item)]
     check_material_styles(p, items)
     text = shot.get('camera', '') + ' ' + shot.get('content', '')
     angle = 'back' if '背面' in text or '背对' in text else 'side' if '侧面' in text or '侧身' in text else 'front'
@@ -1637,7 +1751,9 @@ def creative_refs(p, shot):
         view = item.get('views', {}).get(angle)
         if view and view['source'] == name and view['style'] == settings['style'] and view['description'] == item['desc']:
             name = view['image']
-        if name: refs.append(str(store.asset(p['id'], name)))
+        if name:
+            from scenarios.heritage_study.material_views import material_reference
+            refs.append(material_reference(p,shot,{**item,'image':name},store))
     return refs[:6]
 
 

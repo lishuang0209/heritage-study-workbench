@@ -72,13 +72,15 @@ def checked_ffmpeg(args):
 
 
 class Providers:
-    def split(self, script, *, settings=None, planning=None):
+    def split(self, script, *, settings=None, planning=None, progress=None):
         from models.llm_client import LLM
         from .storyboard import split_storyboard
         query = lambda prompt: LLM().query(prompt, model=Config.LLM_MODEL)
-        if planning and planning.get('kind') == 'heritage-history' and settings is not None and not settings['characters']:
+        guide=((planning or {}).get('research') or {}).get('guide') or {}
+        from scenarios.heritage_study.guide import character
+        if planning and planning.get('kind') == 'heritage-history' and settings is not None and (not settings['characters'] or character(settings,guide)):
             from scenarios.heritage_study.storyboard import history_board
-            return history_board(planning['narration'], query, settings, planning['duration_seconds'])
+            return history_board(planning['narration'], query, settings, planning['duration_seconds'], research=planning.get('research'),progress=progress,speed=planning.get('speech_speed',.95))
         return split_storyboard(script, query, settings=settings, planning=planning)
 
     def extract_settings(self, script):
@@ -212,10 +214,10 @@ schema：''' + json.dumps(Caption.model_json_schema(), ensure_ascii=False)
         result = subprocess.run([ffmpeg_executable(), '-hide_banner', '-i', str(path)], capture_output=True, timeout=20)
         return bool(re.search(r'Stream #.*Audio:', result.stderr.decode('utf-8', errors='replace')))
 
-    def speak(self, text, voice, target):
+    def speak(self, text, voice, target, *, speed=1.0):
         from pipelines.tts import generate_edge_tts
         async def generate():
-            await asyncio.wait_for(generate_edge_tts(text, str(target), voice=voice), timeout=45)
+            await asyncio.wait_for(generate_edge_tts(text, str(target), voice=voice, speed=speed), timeout=45)
         try:
             asyncio.run(generate())
         except TimeoutError as exc:
@@ -234,6 +236,13 @@ schema：''' + json.dumps(Caption.model_json_schema(), ensure_ascii=False)
         if not match:
             raise UserError('无法读取媒体时长，请核对音视频文件')
         return int(match[1]) * 3600 + int(match[2]) * 60 + float(match[3])
+
+    def silent_after(self, path, seconds):
+        # Check the actual decoded tail before allowing a sub-frame overrun.
+        result = subprocess.run([ffmpeg_executable(), '-v', 'error', '-i', str(path),
+            '-ss', f'{seconds:.6f}', '-map', '0:a:0', '-f', 's16le', 'pipe:1'],
+            capture_output=True, timeout=20)
+        return result.returncode == 0 and not any(result.stdout)
 
     def render(self, video, lines, folder, target, duration_seconds=5, ratio='9:16'):
         from pipelines.utils import write_ass_subtitles, _ffmpeg_filter_path

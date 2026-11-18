@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { nextShotStep, imageReady, imageGenerationPlan, adjustmentPlan, unlockedStage, resumeStage, missingCharacters, referenceShot, soundReady, previewVideo, videoEditSource } from './wizard-state.ts';
+import { nextShotStep, imageReady, imageGenerationPlan, adjustmentPlan, unlockedStage, resumeStage, missingCharacters, referenceShot, soundReady, previewVideo, videoEditSource, wizardStepsFor, wizardStorageKey, restoredWizardStage } from './wizard-state.ts';
 function project() {
   return { characters: [{ id: 'c1' }, { id: 'c2' }], baseline: null, shots: [
     { id: 's1', character_ids: ['c1'], image_url: null },
@@ -12,6 +12,28 @@ function complete() {
   for (const s of p.shots) Object.assign(s, { image_url: '/image', clip_url: '/clip', rendered_url: '/sound' });
   return p;
 }
+test('heritage reviews the storyboard before materials, and keeps ordinary ink order', () => {
+  const p={...complete(),id:'study',project_type:'heritage',story_confirmed:true};
+  assert.deepEqual(wizardStepsFor(p),['剧本','分镜','素材与画风','画面','视频','成片']);
+  p.storyboard_confirmed=false; assert.equal(unlockedStage(p),1);
+  p.storyboard_confirmed=true; p.creative_settings=null; assert.equal(unlockedStage(p),2);
+  p.creative_settings={characters:[],scenes:[],props:[],style:'水墨'};
+  assert.equal(unlockedStage(p),5);
+  p.creative_draft=p.creative_settings; assert.equal(unlockedStage(p),2);
+  p.heritage_story_stale=true; assert.equal(unlockedStage(p),1);
+  assert.deepEqual(wizardStepsFor(complete()).slice(0,3),['剧本','创作设定','分镜']);
+});
+test('heritage migrates saved setup/storyboard positions by meaning instead of swapping pages', () => {
+  const p={...complete(),id:'study',project_type:'heritage'};
+  assert.equal(wizardStorageKey(p),'ink.wizard.v3.study');
+  assert.equal(restoredWizardStage(p,1,true),2);
+  assert.equal(restoredWizardStage(p,2,true),1);
+  assert.equal(restoredWizardStage(p,3,true),3);
+  assert.equal(restoredWizardStage(p,1),1);
+  p.storyboard_confirmed=false;
+  assert.equal(restoredWizardStage(p,1,true),1);
+  assert.equal(restoredWizardStage(complete(),1,true),1);
+});
 test('new story starts at step one, with no inaccessible later steps', () => {
   const p = project(); p.shots = [];
   assert.equal(unlockedStage(p), 0); assert.equal(resumeStage(p, 4), 0);

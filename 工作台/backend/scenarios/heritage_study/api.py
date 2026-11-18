@@ -78,6 +78,11 @@ class TrialRecord(Strict):
     notes: str = Field(default='',max_length=1500)
 
 
+class GuideChoice(Strict):
+    enabled: bool
+    version: int = Field(ge=0)
+
+
 def install(api):
     def project(pid,user,write=False):
         p=api.access(pid,user,write)
@@ -94,6 +99,17 @@ def install(api):
     @api.router.get('/heritage/templates')
     def templates(user=Depends(api.identity)):
         return {'templates':CASES}
+
+    @api.router.put('/projects/{pid}/heritage/guide')
+    @api.serialized
+    def select_guide(pid:str,body:GuideChoice,user=Depends(api.identity)):
+        p=project(pid,user,True)
+        if body.version!=p.get('heritage_guide_version',0):raise HTTPException(409,'向导设置已变化，请重新打开后操作')
+        from .guide import set_enabled
+        changed=safe(lambda:set_enabled(p,body.enabled))
+        if changed:
+            api.store.save(p);api.store.event(pid,user['id'],'heritage_guide',{'enabled':body.enabled,'model_calls':0})
+        return api.public(p)
 
     @api.router.post('/projects/{pid}/heritage/material/preview')
     async def preview_material(pid:str, version:int, file:UploadFile=File(...), user=Depends(api.identity)):
@@ -341,10 +357,12 @@ def install(api):
 
     def run_export(jid,pid,user,kind,narration=False):
         try:
+            from .narration import profile
             p=api.store.load(pid);station,script=ready(p);stamp=snapshot(p);folder=api.store.folder(pid)
+            voice_profile=profile(p)
             stem=uuid.uuid4().hex;updates={};chapters=None
             if kind in ('video','both'):
-                target=folder/(stem+'-study.mp4');chapters=export_video(api,p,station,script,folder,target)
+                target=folder/(stem+'-study.mp4');chapters=export_video(api,p,station,script,folder,target,**({'replace_narration':True} if narration else {}))
                 if narration:
                     from .media import add_voiceover
                     add_voiceover(api,p,script,target,user)
@@ -356,8 +374,10 @@ def install(api):
             with api.mutation_lock:
                 current=api.store.load(pid)
                 if snapshot(current)!=stamp:raise UserError('导出期间资料变化，未替换旧导出，请重新确认后重试')
+                if narration and profile(current)!=voice_profile:raise UserError('导出期间讲解音色变化，旧导出已保留，请重新导出')
                 current.update(updates);current['heritage_export_stamp']=stamp
                 if 'final' in updates:current['heritage_audio_policy']='narration' if narration else 'story_original_and_photo_captions'
+                if 'final' in updates:current['heritage_export_voice']=voice_profile if narration else None
                 if chapters:current['heritage_chapters']=chapters
                 if 'final' in updates:current.setdefault('final_versions',[]).append(updates['final'])
                 current.setdefault('heritage_exports',[]).append({'stamp':stamp,'station_version':current['heritage_version'],**updates})

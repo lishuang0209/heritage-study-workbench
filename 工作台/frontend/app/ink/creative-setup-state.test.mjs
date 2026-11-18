@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setupSteps, setupSignature, confirmedSetupReviews, isSetupReviewed, nextSetupStep, setupGenerationJob } from './creative-setup-state.ts';
+import { setupSteps, setupSignature, confirmedSetupReviews, isSetupReviewed, nextSetupStep, setupGenerationJob, setupMaterialSettings, setupImagePresentation } from './creative-setup-state.ts';
 
 function settings() {
   return {
@@ -17,6 +17,38 @@ function settings() {
   };
 }
 const checker = (data, local = {}, confirmed = {}) => step => isSetupReviewed(step, data.style, local, confirmed);
+
+test('heritage scenes and props request one image while characters retain their three-view sheet',()=>{
+  assert.deepEqual(setupImagePresentation('scenes',true,true),{
+    view:'front',label:'重新生成图片',placeholder:'生成一张建筑全景图',hint:'依据研学资料生成单张建筑全景。'});
+  assert.equal(setupImagePresentation('props',true,false).label,'生成图片');
+  assert.equal(setupImagePresentation('props',true,false).view,'front');
+  assert.equal(setupImagePresentation('characters',true,false).view,'sheet');
+  assert.equal(setupImagePresentation('scenes',false,true).view,'front');
+  assert.equal(setupImagePresentation('scenes',false,true).label,'重新生成');
+});
+
+test('legacy automatic photo descriptions are upgraded for display without changing saved data or user descriptions',()=>{
+  const data=settings();
+  data.scenes[0].desc='依据已上传实拍中的可见建筑与空间关系，不补造不可见结构。';
+  data.props[0].desc=`依据实拍标注中的${data.props[0].name}，保留可见形制及连接关系。`;
+  data.props[1].desc='用户填写的固定外观与材质';
+  const before=structuredClone(data);
+  const display=setupMaterialSettings(data,true);
+  assert.match(display.scenes[0].desc,/研学资料.*完整外观/);
+  assert.match(display.props[0].desc,/研学资料.*完整形制/);
+  assert.equal(display.props[1].desc,'用户填写的固定外观与材质');
+  assert.equal(display.scenes[0].image,data.scenes[0].image);
+  assert.deepEqual(data,before);
+  assert.equal(setupMaterialSettings(data,false),data);
+});
+test('heritage skips absent cast and props but retains a scene entry and existing cast', () => {
+  const data={characters:[],scenes:[{id:'temple',name:'建筑'}],props:[],style:'ink'};
+  assert.deepEqual(setupSteps(data,true).map(s=>s.key),['scenes:temple']);
+  assert.deepEqual(setupSteps({...data,scenes:[]},true).map(s=>s.key),['scenes:empty']);
+  assert.equal(setupSteps({...data,characters:[{id:'c1',name:'老师'}]},true)[0].key,'characters:c1');
+  assert.equal(setupSteps(data).length,3);
+});
 
 test('reopening confirmed settings restores reviews without local progress', () => {
   const saved = settings();

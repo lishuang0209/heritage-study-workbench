@@ -134,7 +134,7 @@ def validate_ready(p, store):
 
 def snapshot(p):
     timing = {'timing':p['heritage_timing'],'timing_version':p.get('heritage_timing_version',0)} if p.get('heritage_timing') else {}
-    return hashlib.sha256(json.dumps({'layout':'landscape-v1','version':p.get('heritage_version',0),
+    return hashlib.sha256(json.dumps({'layout':'classroom-v2','version':p.get('heritage_version',0),
         'station':p.get('heritage_station'), 'script':p.get('heritage_script'), **timing,
         'shots':[(s['id'],s.get('revision'),s.get('rendered')) for s in p['shots']]},
         sort_keys=True,ensure_ascii=False).encode()).hexdigest()
@@ -143,6 +143,8 @@ def snapshot(p):
 def decorate(p):
     p['project_type'] = p.get('project_type', 'ink')
     if p['project_type'] != 'heritage': return p
+    from .narration import public_profile
+    p['heritage_narration'] = public_profile(p)
     current_stamp = snapshot(p)
     from .timing import timing_for
     p['heritage_timing']=timing_for(p)
@@ -154,7 +156,7 @@ def decorate(p):
         photo = p['heritage_station'].get(slot)
         if photo:
             photo['url'] = f'/api/ink/projects/{pid}/assets/{photo["image"]}'
-            photo['preview_url'] = f'/api/ink/projects/{pid}/heritage/photos/{slot}/preview?v={version}&layout=landscape-v1'
+            photo['preview_url'] = f'/api/ink/projects/{pid}/heritage/photos/{slot}/preview?v={version}&layout=classroom-v2'
     p['heritage_ready'] = p.get('heritage_confirmed_version') == version
     p['task_card_url'] = f'/api/ink/projects/{pid}/assets/{p["task_card"]}' if p.get('task_card') else None
     if p.get('heritage_export_stamp') != current_stamp:

@@ -12,9 +12,11 @@ def visual_briefs(nodes, settings):
     for index,words in enumerate(nodes):
         if re.search(r'文物保护|保护单位|国保',words):role='protection'
         elif re.search(r'修缮|修建|大修|维修|后世|后期',words):role='repair'
-        elif re.search(r'接下来|抬头|寻找|找到|请.*观察|对照',words):role='observation'
-        elif re.search(r'木构|形制|营造|技艺|技术|构造|连接',words):role='structure'
+        elif re.search(r'接下来|抬头|寻找|找到|请.*观察|对照|先看|来看看|今天.*(?:看|找|观察)',words):role='observation'
+        elif re.search(r'榫卯|咬合|不用.*钉|不使用.*钉',words):role='joinery'
+        elif re.search(r'木构|木结构|形制|营造|技艺|技术|构造|连接',words):role='structure'
         elif re.search(r'前身|寺额|赐|寺名|原名',words):role='origin'
+        elif index>0 and re.search(r'重建|始建|建于|创建|大中祥符|[0-9]{3,4}年',words):role='construction'
         elif index==0:role='establish'
         else:role='context'
         plans={
@@ -22,6 +24,10 @@ def visual_briefs(nodes, settings):
                          '以已确认建筑整体为主体，保留完整外轮廓与周围环境，局部构件只占很小比例。'),
             'origin':('寺名沿革的环境承接','全景，侧前方平视，建筑侧向展开，殿前空间形成前景','建筑侧向外观与殿前空间',[],
                       '从侧前方展示已确认建筑和殿前空间，使用现状作为讲解背景。'),
+            'construction':('以现存建筑说明重建节点','中景，正面略仰视，取柱列与屋檐的承接区域','现存殿身柱列与屋檐的承接',[],
+                            '聚焦已提供建筑资料中的柱列与屋檐承接，作为重建年代讲解的现状依据；与前镜的整体外观拉开景别，不复原古代施工现场。'),
+            'joinery':('观察构件如何衔接','特写，侧向略仰视，取一处构件相接部位并保留连接边界','一处'+component+'与相邻木构的咬合连接',target_ids,
+                       '聚焦已提供资料中的一处'+component+'与相邻木构连接，保留可见咬合边界；不做爆炸图、不拆解构件，不猜测不可见的内部榫卯。'),
             'structure':('说明木构的整体承接关系','中景，檐下侧向略仰视，柱头、梁架与相邻构件同框','梁柱及'+component+'的结构关系',target_ids,
                          '展示可见柱头、梁架与'+component+'的承接关系，保留上下游结构和空间，单个构件不占满画面。'),
             'repair':('观察连接局部并承接修缮讲解','特写，侧向略仰视，一处构件与梁端连接占画面主体','一处'+component+'与相邻结构的连接细节',target_ids,
@@ -41,6 +47,10 @@ def visual_briefs(nodes, settings):
                 camera='中景，侧向平视，构件与相邻结构同框' if camera.startswith('特写') else '特写，侧向略仰视，聚焦一处可见连接'
                 subject='相邻结构关系' if camera.startswith('中景') else '一处可见连接'
                 content='以已确认素材展示'+subject+'，与上一镜的取景范围拉开距离。'
+            elif role=='origin':
+                camera='中景，侧向平视，柱列与檐口形成前后层次'
+                subject='寺名沿革对应的现存殿身与檐口'
+                content='从已提供的建筑可见范围取柱列与檐口，承接寺名沿革讲解；不添加寺额、牌匾或唐代复原形象。'
             else:
                 camera='远景，斜后方平视，建筑整体与环境同框'
                 subject='建筑整体与环境关系'
@@ -52,11 +62,12 @@ def visual_briefs(nodes, settings):
 def differentiated_content(raw,brief,previous=None):
     content=raw.get('content') or ''
     if not isinstance(content,str):return content
+    if not content.strip():return brief['content']
     invalid=(not brief['prop_ids'] and re.search(r'特写|中近景|局部.*主体|木纹.*细节',content))
     if previous:
         normalize=lambda value:re.sub(r'[\s，,。:：;；]','',value)
-        previous_content=previous['content'].split('\n画面补充：',1)[-1]
-        invalid=invalid or SequenceMatcher(None,normalize(content),normalize(previous_content)).ratio()>.8
+        earlier = previous if isinstance(previous,list) else [previous]
+        invalid=invalid or any(SequenceMatcher(None,normalize(content),normalize(shot['content'].split('\n画面补充：',1)[-1])).ratio()>.8 for shot in earlier)
     # Keep the verified shot brief as a local fallback, with no extra model call.
     return brief['content'] if invalid else brief['content']+'\n画面补充：'+content
 

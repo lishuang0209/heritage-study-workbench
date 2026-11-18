@@ -193,7 +193,7 @@ def test_audio_total_over_five_does_not_render(setup, monkeypatch):
     monkeypatch.setattr(api.providers, 'render', lambda *_: pytest.fail('overlong audio must not render'))
     jid = store.enqueue(p['id'], 'alice', 'sound')
     api.run_job(jid, p['id'], {'id': 'alice', 'limits': {'speech': 2}}, 'sound', 's1')
-    assert '累计6.0秒' in store.jobs(p['id'])[0]['error']
+    assert '累计6秒' in store.jobs(p['id'])[0]['error']
     assert store.load(p['id'])['shots'][0]['clip'] == 'old.mp4'
 
 

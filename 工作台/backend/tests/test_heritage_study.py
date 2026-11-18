@@ -229,7 +229,7 @@ def test_optional_narration_checks_each_chapter_duration_before_replacing_video(
     from scenarios.heritage_study.media import add_voiceover
     from scenarios.ink_drama.domain import UserError
     target=tmp_path/'old.mp4';target.write_bytes(b'old')
-    def speak(text,voice,path):path.write_bytes(b'audio')
+    def speak(text,voice,path,**kwargs):path.write_bytes(b'audio')
     facade=SimpleNamespace(providers=SimpleNamespace(speak=speak,duration=lambda path:13),call=lambda user,kind,pid,fn:fn())
     with pytest.raises(UserError,match='超过12秒'):
         add_voiceover(facade,{'id':'project'},{'intro':'过长','location':'定位','task':'任务'},target,{})
@@ -244,7 +244,7 @@ def test_optional_narration_keeps_three_texts_and_pads_to_30_seconds(tmp_path):
     target=tmp_path/'original.mp4'
     checked_ffmpeg(['-f','lavfi','-i','color=c=white:s=180x320:r=30:d=30',
                     '-c:v','libx264','-pix_fmt','yuv420p',str(target)])
-    def speak(text,voice,path):
+    def speak(text,voice,path,**kwargs):
         calls.append(text)
         checked_ffmpeg(['-f','lavfi','-i','sine=frequency=440:duration=1',str(path)])
     provider.speak=speak

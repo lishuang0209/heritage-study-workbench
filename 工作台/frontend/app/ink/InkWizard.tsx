@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Film, LoaderCircle, Settings2, Upload, X, Trash2, RotateCcw } from 'lucide-react';
 import { api, json, type Project, type Shot, type InkCaption, type Track, type DeletedShot } from './ink-shared';
-import { nextShotStep, adjustmentPlan, wizardSteps, unlockedStage, resumeStage, referenceShot, imageReady, imageGenerationPlan, clipReady, soundReady, previewVideo } from './wizard-state';
+import { nextShotStep, adjustmentPlan, wizardStepsFor, setupStageFor, storyboardStageFor, wizardStorageKey, restoredWizardStage, unlockedStage, resumeStage, referenceShot, imageReady, imageGenerationPlan, clipReady, soundReady, previewVideo } from './wizard-state';
 import JobStatus from './JobStatus';
 import { NARRATOR, retainDialogues, speakerName, voiceSpeakers } from './dialogue-state';
+import {studyNarration, unifiedNarration} from './heritage/narration-state';
 import CreativeSetup from './CreativeSetup';
 import StoryboardEditor from './StoryboardEditor';
 import './wizard.css';
@@ -25,6 +26,7 @@ type Props = {
   onVoices: (voices: Record<string, string>) => Promise<Project>;
   onMusic: (id: string) => Promise<Project>;
   onClone: () => Promise<void>;
+  onExport?: () => void;
 };
 function AdjustmentDialog({ title, close, children }: { title: string; close: () => void; children: React.ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -33,8 +35,11 @@ function AdjustmentDialog({ title, close, children }: { title: string; close: ()
     <header><h2 id="ink-adjust-title">{title}</h2><button type="button" onClick={close} aria-label="关闭弹窗"><X size={20} /></button></header>{children}
   </dialog>;
 }
-export default function InkWizard({ project: p, tracks, readonly, onWorkingChange, onAction, onUpdated, onSave, onUpload, onLock, onVoices, onMusic, onClone }: Props) {
-  const storageKey = `ink.wizard.v2.${p.id}`;
+export default function InkWizard({ project: p, tracks, readonly, onWorkingChange, onAction, onUpdated, onSave, onUpload, onLock, onVoices, onMusic, onClone, onExport }: Props) {
+  const heritage = p.project_type === 'heritage';
+  const setupStage = setupStageFor(p), boardStage = storyboardStageFor(p);
+  const wizardSteps = wizardStepsFor(p);
+  const storageKey = wizardStorageKey(p);
   const [requestedStage, setRequestedStage] = useState(() => unlockedStage(p));
   const [hydrated, setHydrated] = useState(false);
   const [activeId, setActiveId] = useState(() => referenceShot(p)?.id || 's1');
@@ -67,11 +72,13 @@ export default function InkWizard({ project: p, tracks, readonly, onWorkingChang
   const shot = p.shots.find(s => s.id === activeId) || referenceShot(p);
   const stageHeading = useRef<HTMLHeadingElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  const nativeAudio = p.video_modes?.find(m => m.id === (shot?.video_settings?.mode || 'first_frame'))?.native_audio;
+  const studyVoice = studyNarration(p);
+  const unifiedVoice = unifiedNarration(p, shot);
+  const nativeAudio = !unifiedVoice && p.video_modes?.find(m => m.id === (shot?.video_settings?.mode || 'first_frame'))?.native_audio;
   const busy = p.jobs.some(j => j.state === 'running');
   const disabled = readonly || pending || busy;
   useEffect(() => {
-    try { const saved = JSON.parse(localStorage.getItem(storageKey) || 'null'); if (saved) { setRequestedStage(resumeStage(p, saved.stage)); if (p.shots.some(s => s.id === saved.shot)) setActiveId(saved.shot); } } catch { /* storage may be unavailable */ }
+    try { const current = localStorage.getItem(storageKey); const saved = JSON.parse(current || localStorage.getItem(`ink.wizard.v2.${p.id}`) || 'null'); if (saved) { setRequestedStage(restoredWizardStage(p, saved.stage, !current)); if (p.shots.some(s => s.id === saved.shot)) setActiveId(saved.shot); } } catch { /* storage may be unavailable */ }
     setHydrated(true);
     // The wizard is keyed by project ID; restore only on entry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -190,23 +197,23 @@ export default function InkWizard({ project: p, tracks, readonly, onWorkingChang
   const upload = (file: File) => run(async () => {
     if (!shot) return;
     await onUpload(shot.id, file);
-    if (stage === 1) {
+    if (stage === setupStage) {
       try { await onAction('caption', shot.id); }
       catch { throw new Error('图片已保存，准备人物信息失败。请点击底部按钮继续准备。'); }
     }
   });
   let primaryLabel = '', primary: () => void = () => {}, primaryDisabled = disabled;
   if (stage === 0) {
-    primaryLabel = '确认剧本，整理创作设定';
+    primaryLabel = heritage ? '确认剧本，进入分镜' : '确认剧本，整理创作设定';
     primary = () => void run(async () => { onUpdated(await api<Project>(`/projects/${p.id}/confirm-story`,json('POST',{}))); setRequestedStage(1); });
-  } else if (stage === 1) {
+  } else if (stage === setupStage) {
     primaryLabel = setupLabel;
-  } else if (stage === 2) {
-    primaryLabel = p.shots.length ? '确认分镜，开始制作画面' : '生成分镜';
+  } else if (stage === boardStage) {
+    primaryLabel = p.shots.length ? heritage ? '确认分镜，准备素材与画风' : '确认分镜，开始制作画面' : heritage ? '解析资料并生成分镜' : '生成分镜';
     primaryDisabled = disabled || storyboardEditing || !!p.storyboard_draft;
     primary = () => void run(async () => {
       if (!p.shots.length) { await onAction('split'); return; }
-      onUpdated(await api<Project>(`/projects/${p.id}/confirm-storyboard`,json('POST',{}))); setRequestedStage(3); setActiveId(p.shots[0].id);
+      onUpdated(await api<Project>(`/projects/${p.id}/confirm-storyboard`,json('POST',{}))); setRequestedStage(heritage ? setupStage : 3); setActiveId(p.shots[0].id);
     });
   } else if (stage === 3 && shot) {
     if (!imageReady(shot)) { const plan=imageGenerationPlan(shot,p.shots.indexOf(shot)+1); primaryLabel=plan.label; primary=()=>plan.mode==='preview'?void generateSavedShot(shot):void run(()=>onAction('image',shot.id)); primaryDisabled=disabled||Boolean(shot.image_proposal); }
@@ -215,43 +222,45 @@ export default function InkWizard({ project: p, tracks, readonly, onWorkingChang
     if (!clipReady(shot)) { primaryLabel = nativeAudio ? `生成${shot.duration ?? 5}秒视频（含原声）` : shot.dialogues.length ? `生成${shot.duration ?? 5}秒视频与配音字幕` : `生成${shot.duration ?? 5}秒视频`; primary = () => void run(() => onAction('video', shot.id)); }
     else if (!soundReady(shot)) { primaryLabel = nativeAudio ? '确认原声视频' : shot.dialogues.length ? '完成配音与字幕（保留视频）' : '完成这个片段'; primary = () => void run(() => onAction('sound', shot.id)); }
     else { const next = nextShotStep(p.shots, shot.id, soundReady); primaryLabel = next ? next.returning ? `返回第 ${next.number} 段，完成待处理内容` : `满意，继续第 ${next.number} 段` : '片段确认完成，去合成'; primary = () => next ? setActiveId(next.shot.id) : go(5); primaryDisabled = pending || busy; }
-  } else { primaryLabel = '合成短片'; primary = () => void run(() => onAction('assemble')); }
+  } else { primaryLabel = heritage ? '前往研学成片导出' : '合成短片'; primary = heritage ? () => onExport?.() : () => void run(() => onAction('assemble')); }
   const reviewingCandidate = ((stage === 3 || stage === 4) && !!shot?.image_proposal) || (stage === 4 && !!shot?.video_proposal);
-  const descriptions = ['确认故事内容，再整理人物、场景和道具。', '分别确认角色、场景和关键道具，统一整部短片的设定。', '逐镜确认出场角色、所在场景、使用道具和动作。', '逐张确认图片，满意后再制作视频。', '逐段播放，检查画面、动作和声音，满意后继续。', '预览、合成并导出短片。'];
-  const relevantActions = [[], ['settings','asset-image'], ['split'], ['image','preview'], ['video','sound','preview','video-preview'], ['assemble']][stage];
+  const descriptions = [heritage ? '确认历史讲解内容，再规划各个镜头。' : '确认故事内容，再整理人物、场景和道具。', ... (heritage ? ['先确认各镜讲什么、展示什么和持续多久，再准备素材。', '按分镜核对建筑、构件与实拍参考，选择统一水墨画风。'] : ['分别确认角色、场景和关键道具，统一整部短片的设定。', '逐镜确认出场角色、所在场景、使用道具和动作。']), '逐张确认图片，满意后再制作视频。', '逐段播放，检查画面、动作和声音，满意后继续。', '预览、合成并导出短片。'];
+  const relevantActions = stage === setupStage ? ['settings','asset-image'] : stage === boardStage ? ['split'] : [[], [], [], ['image','preview'], ['video','sound','preview','video-preview'], ['assemble']][stage];
   const job = p.jobs[0];
   const showJob = job && (job.state === 'running' || (['failed', 'interrupted'].includes(job.state) && relevantActions.includes(job.action)));
-  const setupImageJob = stage === 1 && job?.action === 'asset-image';
+  const setupImageJob = stage === setupStage && job?.action === 'asset-image';
   const footerJob = showJob && (stage === 3 || stage === 4);
   return <div className="ink-wizard">
-    <nav className="ink-wizard-steps" aria-label="创作步骤">{wizardSteps.map((name, index) => <button key={name} type="button" disabled={index > unlockedStage(p) || pending || busy || storyboardEditing} aria-current={stage === index ? 'step' : undefined} onClick={() => go(index, index === 1 ? referenceShot(p)?.id : undefined)}><span>{index < stage ? <Check size={14} /> : index + 1}</span>{name}</button>)}</nav>
+    <nav className="ink-wizard-steps" aria-label="创作步骤">{wizardSteps.map((name, index) => <button key={name} type="button" disabled={index > unlockedStage(p) || pending || busy || storyboardEditing} aria-current={stage === index ? 'step' : undefined} onClick={() => go(index, index === setupStage ? referenceShot(p)?.id : undefined)}><span>{index < stage ? <Check size={14} /> : index + 1}</span>{name}</button>)}</nav>
     <header className="ink-wizard-title"><div><p>第 {stage + 1} 步 / 共 6 步</p><h2 ref={stageHeading} tabIndex={-1}>{wizardSteps[stage]}</h2><p>{descriptions[stage]}</p></div><button type="button" className="ink-wizard-text-button" disabled={pending || busy || storyboardEditing} onClick={() => void run(onClone)}>复制项目</button></header>
     {error ? <p role="alert" className="ink-wizard-error">{error}</p> : null}
     {notice ? <p role="status" className="ink-wizard-review">{notice}{undoNoticeShot === shot?.id && shot?.image_undo ? <button type="button" className="ink-wizard-text-button" disabled={disabled} onClick={() => void chooseCandidate('undo-image')}>撤销</button> : null}</p> : null}
     {showJob && !setupImageJob && !footerJob ? <JobStatus jobs={[job]} /> : null}
-    {stage < 2 ? <section className="ink-background-panel" aria-label="故事时代背景"><div><strong>时代背景：{p.background?.era || '不指定'}</strong><span className="ink-wizard-footnote">{p.background?.era ? '用于人物服饰、场景与道具' : '按剧本设定生成'}</span></div><button type="button" disabled={disabled} onClick={()=>{setEraDraft(p.background?.era||'');setEditingBackground(true);}}>修改背景</button>{editingBackground ? <form onSubmit={e=>{e.preventDefault();void run(async()=>{onUpdated(await api<Project>(`/projects/${p.id}/background`,json('PUT',{era:eraDraft})));setEditingBackground(false);setNotice('背景已保存。已有图片保留，请核对人物、场景和道具设定。');});}}><fieldset disabled={disabled} className="ink-era-options"><legend>选择时代背景</legend><div className="ink-era-grid">{eraChoices.map(era=><label key={era || 'none'}><input type="radio" name="era" checked={eraDraft===era} onChange={()=>setEraDraft(era)}/>{era || '不指定'}</label>)}</div></fieldset><p className="ink-wizard-footnote">修改背景不会自动重写原文、服饰描述或已有图片。</p><button disabled={disabled}>保存背景</button><button type="button" disabled={disabled} onClick={()=>setEraDraft('')}>清空朝代</button><button type="button" disabled={disabled} onClick={()=>setEditingBackground(false)}>取消</button></form>:null}</section>:null}
+    {stage === 0 || stage === setupStage ? <section className="ink-background-panel" aria-label="故事时代背景"><div><strong>时代背景：{p.background?.era || '不指定'}</strong><span className="ink-wizard-footnote">{p.background?.era ? '用于人物服饰、场景与道具' : '按剧本设定生成'}</span></div><button type="button" disabled={disabled} onClick={()=>{setEraDraft(p.background?.era||'');setEditingBackground(true);}}>修改背景</button>{editingBackground ? <form onSubmit={e=>{e.preventDefault();void run(async()=>{onUpdated(await api<Project>(`/projects/${p.id}/background`,json('PUT',{era:eraDraft})));setEditingBackground(false);setNotice('背景已保存。已有图片保留，请核对人物、场景和道具设定。');});}}><fieldset disabled={disabled} className="ink-era-options"><legend>选择时代背景</legend><div className="ink-era-grid">{eraChoices.map(era=><label key={era || 'none'}><input type="radio" name="era" checked={eraDraft===era} onChange={()=>setEraDraft(era)}/>{era || '不指定'}</label>)}</div></fieldset><p className="ink-wizard-footnote">修改背景不会自动重写原文、服饰描述或已有图片。</p><button disabled={disabled}>保存背景</button><button type="button" disabled={disabled} onClick={()=>setEraDraft('')}>清空朝代</button><button type="button" disabled={disabled} onClick={()=>setEditingBackground(false)}>取消</button></form>:null}</section>:null}
     {stage === 0 ? <section className="ink-wizard-story"><h3>剧本原文</h3><p style={{whiteSpace:'pre-wrap'}}>{p.script}</p><p className="ink-wizard-footnote">已有镜头内容可在“分镜”步骤逐镜调整。</p></section>
-    : stage === 1 ? <CreativeSetup onPrimaryLabel={setSetupLabel} project={p} disabled={disabled} run={run} onUpdated={onUpdated} onConfirmed={()=>setRequestedStage(2)} onExtract={()=>onAction('settings')} />
-    : stage === 2 ? <StoryboardEditor project={p} disabled={disabled} onGenerate={() => void run(() => onAction('split'))} onSave={onSave} onUpdated={onUpdated}
+    : stage === setupStage ? <CreativeSetup onPrimaryLabel={setSetupLabel} project={p} disabled={disabled} run={run} onUpdated={onUpdated} onConfirmed={()=>setRequestedStage(heritage ? 3 : boardStage)} onExtract={()=>onAction('settings')} />
+    : stage === boardStage ? <StoryboardEditor project={p} disabled={disabled} onGenerate={() => void run(() => onAction('split'))} onSave={onSave} onUpdated={onUpdated}
       onEditingChange={editing => { setStoryboardEditing(editing); onWorkingChange(editing); if (editing) { setError(''); setNotice(''); } }}
       onDelete={(shot, number) => { setError(''); setDeleteTarget({ shot, number }); }} onRestore={item => void restoreShot(item)} />
     : stage < 5 && shot ? <>
       {stage > 2 ? <nav className="ink-wizard-thumbs" aria-label="选择镜头">{p.shots.map((s, i) => <button key={s.id} type="button" disabled={pending || busy} aria-current={s.id === shot.id ? 'true' : undefined} onClick={() => { setActiveId(s.id); setError(''); }}>{s.image_url ? <img src={s.image_url} alt={`第${i + 1}镜`} /> : <Film size={22} />}<span>第 {i + 1} 镜</span><small>{s.image_proposal ? '候选待确认' : stage === 3 ? imageReady(s) ? '图片已就绪' : s.image_url ? '待更新' : '待出图' : soundReady(s) ? '片段已就绪' : clipReady(s) ? '待配音字幕' : '待生成视频'}</small></button>)}</nav> : null}
       <section className="ink-wizard-scene">
-        <div className="ink-wizard-media">{stage === 4 && previewVideo(shot) ? <video key={previewVideo(shot)} controls preload="metadata" src={previewVideo(shot)!} /> : shot.image_url ? <img src={shot.image_url} alt={shot.scene || '当前分镜'} /> : <div><Film size={42} /><p>{stage === 1 ? '先生成一张参考图' : '等待生成图片'}</p></div>}</div>
-        <div className="ink-wizard-scene-copy"><p className="ink-wizard-eyebrow">{stage === 1 ? '参考画面' : `第 ${p.shots.indexOf(shot) + 1} 镜 · ${shot.duration ?? 5}秒`}</p><h3>{shot.scene || '当前镜头'}</h3><p>{shot.content}</p>
-          <div className="ink-wizard-tags">{shot.character_ids.map(id => <span key={id}>{p.characters.find(c => c.id === id)?.name || '角色'}</span>)}<span>{stage === 1 ? '水墨风格' : stage === 3 ? imageReady(shot) ? '图片已就绪' : '待出图' : soundReady(shot) ? '片段已就绪' : clipReady(shot) ? '待配音字幕' : '待生成视频'}</span></div>
+        <div className="ink-wizard-media">{stage === 4 && previewVideo(shot) ? <video key={previewVideo(shot)} controls preload="metadata" src={previewVideo(shot)!} /> : shot.image_url ? <img src={shot.image_url} alt={shot.scene || '当前分镜'} /> : <div><Film size={42} /><p>{stage === setupStage ? '先生成一张参考图' : '等待生成图片'}</p></div>}</div>
+        <div className="ink-wizard-scene-copy"><p className="ink-wizard-eyebrow">{stage === setupStage ? '参考画面' : `第 ${p.shots.indexOf(shot) + 1} 镜 · ${shot.duration ?? 5}秒`}</p><h3>{shot.scene || '当前镜头'}</h3><p>{shot.content}</p>
+          <div className="ink-wizard-tags">{shot.character_ids.map(id => <span key={id}>{p.characters.find(c => c.id === id)?.name || '角色'}</span>)}<span>{stage === setupStage ? '水墨风格' : stage === 3 ? imageReady(shot) ? '图片已就绪' : '待出图' : soundReady(shot) ? '片段已就绪' : clipReady(shot) ? '待配音字幕' : '待生成视频'}</span></div>
           {stage === 4 && previewVideo(shot) && !clipReady(shot) ? <p className="ink-wizard-review" role="status">正在预览已保留的视频，尚未确认用于当前镜头。可在“历史版本”中确认使用，或重新生成。</p> : null}
           {stage === 3 && shot.image_url && shot.image_stale ? <div className="ink-wizard-review" role="status"><strong>图片待更新</strong><p>{shot.image_stale_reason || '当前展示的是原有图片，请核对是否符合新分镜。'}</p></div> : null}
+          {stage===4&&unifiedVoice?<p className="ink-wizard-footnote">讲解音色：{studyVoice.label.replace('（推荐）','')} · {studyVoice.speed<1?'稍慢语速':'正常语速'}{shot.audio_source==='original'?'。当前视频为原声，可点击“更新配音”统一音色。':''}</p>:null}
           {stage >= 3 ? <><>{stage === 4 ? <p className="ink-wizard-motion">视频动作：{shot.video_settings?.motion ?? shot.motion}</p> : null}</><p className="ink-wizard-footnote">构图：{shot.camera}</p></> : null}
           <div className={`ink-wizard-secondary ${stage===3?'ink-image-actions':''}`} role="group" aria-label={stage===3?'图片操作':'视频操作'}>
             {stage===3&&shot.image_url?<button type="button" className="ink-primary-button" disabled={disabled||Boolean(shot.image_proposal)} title={shot.image_proposal?'请先采用或放弃当前候选图片':undefined} onClick={()=>void generateSavedShot(shot)}>{imageGenerationPlan(shot).label}</button>:null}
             <button type="button" disabled={pending} onClick={() => void openHistory()}>历史版本</button>
             {stage === 4 ? <button type="button" disabled={disabled || !(shot.clip_url || shot.rendered_url)} onClick={() => setModal('video-edit')}>基于此视频调整</button> : null}
-            {shot.image_url ? <button type="button" disabled={disabled} onClick={() => stage === 3 ? openShot(shot) : void run(() => onAction('video', shot.id))}>{stage === 4 ? nativeAudio ? '重新生成视频（含原声）' : '重新生成视频与配音字幕' : stage === 1 ? '重新生成参考图' : '修改图片'}</button> : null}
+            {shot.image_url ? <button type="button" disabled={disabled} onClick={() => stage === 3 ? openShot(shot) : void run(() => onAction('video', shot.id))}>{stage === 4 ? nativeAudio ? '重新生成视频（含原声）' : '重新生成视频与配音字幕' : stage === setupStage ? '重新生成参考图' : '修改图片'}</button> : null}
             {stage===4?<button type="button" disabled={disabled} onClick={()=>{setVideoDraft({mode:shot.video_settings?.mode || 'first_frame',end_shot_id:shot.video_settings?.end_shot_id || '',motion:shot.video_settings?.motion ?? shot.motion,camera:shot.video_settings?.camera ?? '',duration:shot.duration ?? 5});setModal('video');}}><Settings2 size={14}/>重新生成设置</button>:null}
             {stage===3&&shot.image_url&&shot.image_stale?<button type="button" disabled={disabled||Boolean(shot.image_proposal)} onClick={()=>void confirmCurrent()}>保留旧图</button>:null}
-            {stage < 4 ? <><input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" aria-label="上传自己的图片" disabled={disabled} onChange={e => { const file = e.target.files?.[0]; if (file) void upload(file); e.target.value = ''; }} /><button type="button" disabled={disabled} onClick={() => fileInput.current?.click()}><Upload size={14} />上传图片</button></> : nativeAudio ? null : <button type="button" disabled={disabled} onClick={() => { setVoiceDraft(Object.fromEntries(voiceSpeakers(p).map(c => [c.id, p.voices?.[c.id] || (c.id === 'c2' ? 'zh-CN-XiaoxiaoNeural' : 'zh-CN-YunjianNeural')]))); setModal('voices'); }}>声音设置（可选）</button>}
+            {stage < 4 ? <><input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" aria-label="上传自己的图片" disabled={disabled} onChange={e => { const file = e.target.files?.[0]; if (file) void upload(file); e.target.value = ''; }} /><button type="button" disabled={disabled} onClick={() => fileInput.current?.click()}><Upload size={14} />上传图片</button></> : nativeAudio && !heritage ? null : <button type="button" disabled={disabled} onClick={() => { setVoiceDraft(Object.fromEntries(voiceSpeakers(p).map(c => [c.id, c.id===NARRATOR&&heritage?studyVoice.voice:p.voices?.[c.id] || (c.id === 'c2' ? 'zh-CN-XiaoxiaoNeural' : 'zh-CN-YunjianNeural')]))); setModal('voices'); }}>声音设置</button>}
+            {stage===4&&unifiedVoice&&clipReady(shot)?<button type="button" disabled={disabled} onClick={()=>void run(()=>onAction('sound',shot.id))}>更新配音</button>:null}
           </div>
           {stage === 4 && shot.dialogues.length ? <details><summary>台词</summary>{shot.dialogues.map((d, i) => <p key={i}>{speakerName(p.characters,d.character_id)}：{d.text}</p>)}</details> : null}
         </div>
@@ -263,7 +272,7 @@ export default function InkWizard({ project: p, tracks, readonly, onWorkingChang
       <label>背景音乐<select value={p.music_credit ? tracks.find(t => t.title === p.music_credit?.title)?.id || '__current' : ''} disabled={disabled} onChange={e => void run(() => onMusic(e.target.value))}><option value="">无背景音乐</option>{p.music_credit && !tracks.some(t => t.title === p.music_credit?.title) ? <option value="__current">{p.music_credit.title}（已保存）</option> : null}{tracks.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select></label>
       {p.music_credit ? <small>{p.music_credit.license}</small> : <small>保留片段中的配音，不添加背景音乐。</small>}
     </section>}
-    <footer className="ink-wizard-footer">{footerJob?<div className="ink-wizard-action-feedback"><JobStatus jobs={[job]}/></div>:null}<button type="button" className="ink-wizard-back" disabled={stage === 0 || pending || busy || storyboardEditing} onClick={() => go(stage - 1)}><ArrowLeft size={16} />上一步</button><span>{busy || pending ? stage === 4 && shot?.media_step === 'sound' ? '视频已完成，正在添加配音字幕…' : '处理中，完成后会自动更新' : storyboardEditing ? '请先保存或取消当前编辑' : `第 ${stage + 1} 步：${wizardSteps[stage]}`}</span>{reviewingCandidate ? <span>请在候选对比下方选择采用或放弃</span> : stage === 5 && p.final_url && !p.final_stale ? <a className="ink-primary-button" href={p.final_url} download>下载短片</a> : <button type={stage === 1 ? "submit" : "button"} form={stage === 1 ? "creative-settings-form" : undefined} className="ink-primary-button" disabled={primaryDisabled} onClick={stage === 1 ? undefined : primary}>{busy || pending ? <><LoaderCircle size={16} className="ink-job-spinner" />处理中…</> : <>{primaryLabel}<ArrowRight size={16} /></>}</button>}</footer>
+    <footer className="ink-wizard-footer">{footerJob?<div className="ink-wizard-action-feedback"><JobStatus jobs={[job]}/></div>:null}<button type="button" className="ink-wizard-back" disabled={stage === 0 || pending || busy || storyboardEditing} onClick={() => go(stage - 1)}><ArrowLeft size={16} />上一步</button><span>{busy || pending ? stage === 4 && shot?.media_step === 'sound' ? '视频已完成，正在添加配音字幕…' : '处理中，完成后会自动更新' : storyboardEditing ? '请先保存或取消当前编辑' : `第 ${stage + 1} 步：${wizardSteps[stage]}`}</span>{reviewingCandidate ? <span>请在候选对比下方选择采用或放弃</span> : stage === 5 && p.final_url && !p.final_stale ? <a className="ink-primary-button" href={p.final_url} download>下载短片</a> : <button type={stage === setupStage ? "submit" : "button"} form={stage === setupStage ? "creative-settings-form" : undefined} className="ink-primary-button" disabled={primaryDisabled} onClick={stage === setupStage ? undefined : primary}>{busy || pending ? <><LoaderCircle size={16} className="ink-job-spinner" />处理中…</> : <>{primaryLabel}<ArrowRight size={16} /></>}</button>}</footer>
     {deleteTarget ? <AdjustmentDialog title={`删除第 ${deleteTarget.number} 镜？`} close={() => { if (!pending) setDeleteTarget(null); }}>
       <div className="ink-wizard-dialog-body"><strong>{deleteTarget.shot.scene}</strong><p>删除后不参与后续生成和合成。已有图片、视频保留，可随时恢复分镜。</p>{error ? <p role="alert" className="ink-wizard-error">{error}</p> : null}</div>
       <footer className="ink-delete-footer"><button type="button" autoFocus disabled={pending} onClick={() => setDeleteTarget(null)}>取消</button><button type="button" className="ink-primary-button" disabled={disabled} onClick={() => void deleteShot()}>{pending ? '正在删除…' : '删除分镜'}</button></footer>
@@ -279,7 +288,7 @@ export default function InkWizard({ project: p, tracks, readonly, onWorkingChang
           setRequestedStage(editPlan.action === 'image' ? 3 : 4);
           try { await onAction(editPlan.action, draft.id); }
           catch (e) { throw new Error(`调整已保存，但生成未启动。请使用底部按钮重试。${e instanceof Error ? e.message : ''}`); }
-        } else if (editPlan?.label === '保存并确定人物画风') { setRequestedStage(1); }
+        } else if (editPlan?.label === '保存并确定人物画风') { setRequestedStage(setupStage); }
         else { setNotice(editPlan?.hint || '调整已保存'); }
       }); }}>
       <div className="ink-wizard-dialog-body">{stage >= 3 ? <><fieldset><legend>怎么修改？</legend><label><input type="radio" name="image-mode" checked={editMode === 'style'} disabled={!draft.image_url} onChange={() => setEditMode('style')} />修正画风 · 保留画面内容</label><label><input type="radio" name="image-mode" checked={editMode === 'detail'} disabled={!draft.image_url} onChange={() => setEditMode('detail')} />局部调整 · 小动作、表情、细节</label><label><input type="radio" name="image-mode" checked={editMode === 'redesign'} onChange={() => setEditMode('redesign')} />重新设计画面 · 姿势、互动、构图</label></fieldset><p className="ink-wizard-footnote">{editMode === 'style' ? '按项目画风重绘，尽量保留人物、姿势和构图。' : editMode === 'detail' ? '基于当前使用的图片，只改指定部位。支持抬手、转头、视线、持物方式；整体转身或大幅站位变化请选择重新设计。' : '按首帧姿势、素材和画风重画。后续动作请到视频页调整。'}</p></> : null}
@@ -325,6 +334,6 @@ export default function InkWizard({ project: p, tracks, readonly, onWorkingChang
       onUpdated(await api<Project>(`/projects/${p.id}/shots/${shot.id}/video-settings`,json('PUT',videoDraft)));
       await onAction('video',shot.id);setModal(null);
     });}}><div className="ink-wizard-dialog-body"><label>生成模式<select value={videoDraft.mode} onChange={e=>{const mode=e.target.value;const ds=p.video_modes?.find(x=>x.id===mode)?.durations || [5];setVideoDraft({...videoDraft,mode,duration:ds.includes(videoDraft.duration)?videoDraft.duration:ds[0]});}}>{(p.video_modes || [{id:'first_frame',label:'首帧生成',supported:true}]).map(x=><option key={x.id} value={x.id} disabled={!x.supported}>{x.label}{!x.supported?' · 请先配置模型':''}</option>)}</select></label><p className="ink-wizard-footnote">{videoDraft.mode==='reference'?'使用本片段已确认的角色和场景图，首帧构图由模型生成。':videoDraft.mode==='start_end_frame'?'从当前画面过渡到所选尾帧。跨场景切换时请谨慎使用。':'以当前分镜图作为视频起始画面。'}</p>{videoDraft.mode==='start_end_frame'?<label>尾帧画面<select value={videoDraft.end_shot_id} onChange={e=>setVideoDraft({...videoDraft,end_shot_id:e.target.value})}><option value="">下一片段画面（默认）</option>{p.shots.filter(x=>x.id!==shot.id&&x.image_url&&!x.image_stale).map(x=><option key={x.id} value={x.id}>第{p.shots.indexOf(x)+1}段 · {x.scene}</option>)}</select></label>:null}<label>人物与环境动作<textarea required maxLength={6000} rows={4} value={videoDraft.motion} onChange={e=>setVideoDraft({...videoDraft,motion:e.target.value})}/></label><label>运镜<textarea maxLength={500} rows={2} placeholder="例如：镜头缓缓推近，或固定镜头" value={videoDraft.camera} onChange={e=>setVideoDraft({...videoDraft,camera:e.target.value})}/></label><label>视频时长<select value={videoDraft.duration} onChange={e=>setVideoDraft({...videoDraft,duration:Number(e.target.value)})}>{(p.video_modes?.find(x=>x.id===videoDraft.mode)?.durations || p.video_durations || [5]).map(n=><option key={n} value={n}>{n}秒</option>)}</select></label>{error?<p role="alert" className="ink-wizard-error">{error}</p>:null}</div><footer><button className="ink-primary-button" disabled={disabled||!videoDraft.motion.trim()}>{pending?'正在提交…':'按设置生成视频'}</button></footer></form></AdjustmentDialog>:null}
-    {modal === 'voices' ? <AdjustmentDialog title="配音设置" close={() => { if (!pending) setModal(null); }}><div className="ink-wizard-dialog-body">{voiceSpeakers(p).map(c => <label key={c.id}>{c.name}<select value={voiceDraft[c.id]} onChange={e => setVoiceDraft({ ...voiceDraft, [c.id]: e.target.value })}><option value="zh-CN-YunjianNeural">云健 · 男声</option><option value="zh-CN-XiaoxiaoNeural">晓晓 · 女声</option></select></label>)}<p>保存后，已有配音片段需要重新生成。</p>{error ? <p role="alert">{error}</p> : null}</div><footer><button type="button" className="ink-primary-button" disabled={disabled} onClick={() => void run(async () => { await onVoices(voiceDraft); setModal(null); })}>保存音色</button></footer></AdjustmentDialog> : null}
+    {modal === 'voices' ? <AdjustmentDialog title="配音设置" close={() => { if (!pending) setModal(null); }}><div className="ink-wizard-dialog-body">{voiceSpeakers(p).filter(c=>!heritage||c.id===NARRATOR||p.shots.some(s=>s.dialogues.some(d=>d.character_id===c.id))).map(c => <label key={c.id}>{c.name}<select value={voiceDraft[c.id]} onChange={e => setVoiceDraft({ ...voiceDraft, [c.id]: e.target.value })}>{heritage?studyVoice.choices.map(item=><option key={item.voice} value={item.voice}>{item.label}</option>):<><option value="zh-CN-YunjianNeural">云健 · 男声</option><option value="zh-CN-XiaoxiaoNeural">晓晓 · 女声</option></>}</select></label>)}<p>{heritage?'全片旁白使用同一音色。保存后点击“更新配音”，已有画面保留。':'保存后，已有配音片段需要重新生成。'}</p>{error ? <p role="alert">{error}</p> : null}</div><footer><button type="button" className="ink-primary-button" disabled={disabled} onClick={() => void run(async () => { await onVoices(voiceDraft); setModal(null); })}>保存音色</button></footer></AdjustmentDialog> : null}
   </div>;
 }

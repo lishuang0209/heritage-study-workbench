@@ -78,7 +78,7 @@ def script_from_station(station,timing=None):
     history=histories[0] if histories else '';observation=observations[0] if observations else ''
     if history:
         prefix='' if station['building'] in history else station['building']+'。'
-        bridge='接下来，抬头寻找'+station['component']+'。'
+        bridge=('一起寻找' if timing['intro'] <= 15 else '接下来，抬头寻找')+station['component']+'。'
         selected=history+'。'
         # Keep complete supplied facts; longer budgets admit more history, not
         # a fixed case-specific two-sentence opening. Never invent filler.
