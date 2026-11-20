@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import Select from '@/components/Select';
 import React, { useState, useRef, useEffect } from 'react';
 import { CheckCircle, Circle, Loader, Edit3, AlertCircle, Square, Zap, Settings2, ChevronDown } from 'lucide-react';
 import clsx from 'clsx';
@@ -58,7 +59,7 @@ interface TopBarProps {
   showVideoModels?: boolean;
 }
 
-/* ─── 带 Provider 分组的 <select> ─── */
+/* ─── 带 Provider 分组的模型选择 ─── */
 function ProviderSelect({
   value,
   providers,
@@ -69,7 +70,7 @@ function ProviderSelect({
   onChange: (val: string) => void;
 }) {
   return (
-    <select
+    <Select
       value={value}
       onChange={e => onChange(e.target.value)}
       className="bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-700 outline-none w-full"
@@ -81,7 +82,7 @@ function ProviderSelect({
           ))}
         </optgroup>
       ))}
-    </select>
+    </Select>
   );
 }
 
@@ -107,7 +108,13 @@ function ModelSelector({
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const panel = ref.current;
+      const target = e.target;
+      if (!panel || !(target instanceof Element) || panel.contains(target)) return;
+      const list = target.closest('[role="listbox"]');
+      const ownList = list && Array.from(panel.querySelectorAll('[role="combobox"][aria-controls]'))
+        .some(control => control.getAttribute('aria-controls') === list.id);
+      if (!ownList) setOpen(false);
     };
     if (open) document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -215,7 +222,7 @@ function ModelSelector({
           {showVideoModels && (<>
           <label className="flex flex-col gap-1">
             <span className="text-[10px] text-gray-400 font-medium">视频生成方式</span>
-            <select
+            <Select
               value={config.video_generation_mode}
               onChange={e => updateVideoMode(e.target.value as VideoGenerationMode)}
               className="bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-700 outline-none w-full"
@@ -223,7 +230,7 @@ function ModelSelector({
               {VIDEO_GENERATION_MODES.map(item => (
                 <option key={item.id} value={item.id}>{item.label}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-[10px] text-gray-400 font-medium">{activeVideoLabel}模型</span>
@@ -268,7 +275,7 @@ function ModelSelector({
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-[10px] text-gray-400 font-medium">{showVideoModels ? '视频分辨率' : '分辨率'}</span>
-            <select
+            <Select
               value={config.video_resolution}
               onChange={e => update('video_resolution', e.target.value)}
               className="bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-700 outline-none w-full"
@@ -276,7 +283,7 @@ function ModelSelector({
               {VIDEO_RESOLUTIONS.map(item => (
                 <option key={item.id} value={item.id}>{item.label}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
             <input

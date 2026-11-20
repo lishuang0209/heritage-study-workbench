@@ -1,5 +1,6 @@
 'use client';
 
+import Select from '@/components/Select';
 import { useEffect, useState } from 'react';
 import { CheckCircle, Loader2, Save, Settings, XCircle } from 'lucide-react';
 import BrandHeader from '@/components/BrandHeader';
@@ -326,16 +327,16 @@ export default function SettingsPage() {
                       <label key={field.path} className="flex flex-col gap-1.5 min-w-0">
                         <span className="text-xs font-medium text-gray-500">{field.label}</span>
                         {field.type === 'boolean' ? (
-                          <select
+                          <Select
                             value={String(Boolean(value))}
                             onChange={event => updateField(field, event.target.value === 'true')}
                             className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 outline-none focus:border-neutral-300"
                           >
                             <option value="true">true</option>
                             <option value="false">false</option>
-                          </select>
+                          </Select>
                         ) : field.type === 'select' ? (
-                          <select
+                          <Select
                             value={String(value ?? '')}
                             onChange={event => updateField(field, event.target.value)}
                             className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 outline-none focus:border-neutral-300"
@@ -353,7 +354,7 @@ export default function SettingsPage() {
                                 <option key={option.id} value={option.id}>{option.label}</option>
                               ))
                             )}
-                          </select>
+                          </Select>
                         ) : field.type === 'password' ? (
                           <input
                             type="password"

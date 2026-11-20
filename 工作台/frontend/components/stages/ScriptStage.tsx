@@ -1,5 +1,6 @@
 'use client';
 
+import Select from '@/components/Select';
 import React, { useState, useCallback } from 'react';
 import { Save, X, Code, LayoutList, Users, MapPin, Film, Sparkles, BookOpen, Lightbulb, Target, User, Crosshair, RefreshCw, Palette } from 'lucide-react';
 import type { StageViewProps } from './types';
@@ -665,10 +666,10 @@ export default function ScriptStage({ stage, state, onConfirm, onIntervene, onRe
                           <input type="text" value={c.name} onChange={e => updateCharacter(i, { name: e.target.value })}
                             className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-neutral-900/30 outline-none" /></label>
                         <label className="flex flex-col gap-1 text-xs w-24"><span className="text-gray-500 font-medium">角色</span>
-                          <select value={c.role} onChange={e => updateCharacter(i, { role: e.target.value })}
+                          <Select value={c.role} onChange={e => updateCharacter(i, { role: e.target.value })}
                             className="border border-gray-200 rounded-lg px-2 py-2 text-sm text-gray-700 outline-none">
                             <option value="主角">主角</option><option value="配角">配角</option><option value="背景">背景</option>
-                          </select></label>
+                          </Select></label>
                       </div>
                       <label className="flex flex-col gap-1 text-xs"><span className="text-gray-500 font-medium">外貌描述</span>
                         <textarea value={c.description} onChange={e => updateCharacter(i, { description: e.target.value })} rows={2}

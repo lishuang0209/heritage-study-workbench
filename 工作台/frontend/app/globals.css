@@ -480,22 +480,22 @@ body {
     font-weight: 400 !important;
 }
 
-.sfa-generation-panel select {
+.sfa-generation-panel .app-select-trigger {
     min-height: 40px;
-    padding: 8px 12px !important;
+    padding-block: 8px;
     border: 1px solid var(--lp-border-subtle) !important;
     border-radius: var(--lp-radius-control) !important;
-    background: var(--lp-surface) !important;
+    background-color: var(--lp-surface) !important;
     color: var(--lp-text-default) !important;
     font-family: var(--font-app);
     font-size: 14px;
 }
 
-.sfa-generation-panel select:focus {
+.sfa-generation-panel .app-select-trigger:focus {
     border-color: var(--lp-border-strong) !important;
 }
 
-.sfa-generation-panel button {
+.sfa-generation-panel button:not(.app-select-trigger) {
     border-color: var(--lp-border-subtle) !important;
     border-radius: var(--lp-radius-control) !important;
     background: var(--lp-surface) !important;

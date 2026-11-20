@@ -10,3 +10,5 @@ export const brand: BrandConfig = {
     tagline: process.env.NEXT_PUBLIC_APP_TAGLINE || 'AI 漫剧创作',
     storagePrefix: 'sfa',
 };
+
+export const heritageBrandName = '古建研学水墨短片工作台';

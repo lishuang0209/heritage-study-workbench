@@ -1,5 +1,6 @@
 'use client';
 
+import Select from '@/components/Select';
 import { useState, useEffect, useRef, DragEvent } from 'react';
 import { Sparkles, Image, Video, MessageSquare, Zap, Loader2, Copy, Check, Trash2, X, FolderOpen, Upload, Globe, Hexagon } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
@@ -630,7 +631,8 @@ export default function SandboxPage() {
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
                     <label className="block text-sm font-medium text-gray-700 mb-2">选择模型</label>
-                    <select
+                    <Select
+                      aria-label="选择模型"
                       value={selectedModel}
                       onChange={e => setSelectedModel(e.target.value)}
                       className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-neutral-900 focus:border-transparent outline-none"
@@ -638,7 +640,7 @@ export default function SandboxPage() {
                       {getModels().map(m => (
                         <option key={m.id} value={m.id}>{m.label}</option>
                       ))}
-                    </select>
+                    </Select>
                   </div>
                   {/* 联网搜索开关 */}
                   {activeTool === 'llm' && (

@@ -253,6 +253,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setOpen(loadSidebarOpen());
   }, []);
 
+  if (pathname === '/ink') return children;
+
   const setSidebarOpen = (nextOpen: boolean) => {
     setOpen(nextOpen);
     saveSidebarOpen(nextOpen);

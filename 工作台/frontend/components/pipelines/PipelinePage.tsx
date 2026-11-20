@@ -1,5 +1,6 @@
 'use client';
 
+import Select from '@/components/Select';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -160,7 +161,7 @@ function SelectField({
   return (
     <label className="flex flex-col gap-1.5 min-w-0">
       <span className="text-xs font-medium text-gray-500">{label}</span>
-      <select
+      <Select
         value={value}
         onChange={e => onChange(e.target.value)}
         className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 outline-none focus:border-neutral-300"
@@ -172,7 +173,7 @@ function SelectField({
             ))}
           </optgroup>
         ))}
-      </select>
+      </Select>
     </label>
   );
 }
@@ -1251,15 +1252,15 @@ export default function PipelinePage({ pipeline, title, subtitle }: PipelinePage
                   )}
                   <label className="flex flex-col gap-1.5">
                     <span className="text-xs font-medium text-gray-500">视频比例</span>
-                    <select value={ratio} onChange={e => setRatio(e.target.value)} className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 outline-none">
+                    <Select value={ratio} onChange={e => setRatio(e.target.value)} className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 outline-none">
                       {VIDEO_RATIOS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
-                    </select>
+                    </Select>
                   </label>
                   <label className="flex flex-col gap-1.5">
                     <span className="text-xs font-medium text-gray-500">视频分辨率</span>
-                    <select value={videoResolution} onChange={e => setVideoResolution(e.target.value)} className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 outline-none">
+                    <Select value={videoResolution} onChange={e => setVideoResolution(e.target.value)} className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 outline-none">
                       {VIDEO_RESOLUTIONS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
-                    </select>
+                    </Select>
                   </label>
                   {(pipeline === 'action_transfer' || (pipeline === 'standard' && (standardVideoMode === 'dynamic_video' || templateVideoEnabled))) && (
                     <NumberField label="视频时长" value={duration} onChange={setDuration} min={1} max={10} />

@@ -1,0 +1,113 @@
+.ink-page.ink-page-heritage .study-photo {
+  padding: clamp(18px, 1.67vw, 32px);
+  border-radius: 10px;
+}
+
+.ink-page-heritage .study-photo-heading,
+.ink-page-heritage .study-photo-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ink-page-heritage .study-photo-heading { justify-content: space-between; flex-wrap: wrap; margin-bottom: 20px; }
+.ink-page.ink-page-heritage .study-photo-heading h3 { margin: 0; color: var(--lp-text-strong); font: 700 22px/30px var(--heritage-display); }
+.ink-page-heritage .study-photo-heading span {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--lp-surface-subtle);
+  color: var(--lp-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.ink-page-heritage .study-photo-heading span[data-required='true'] { background: var(--lp-surface-soft); color: var(--heritage-accent); }
+.ink-page.ink-page-heritage .study-photo .study-photo-file[hidden] { display: none; }
+
+.ink-page-heritage .study-photo-layout {
+  display: grid;
+  grid-template-columns: minmax(0, min(31%, 240px)) minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(16px, 1.67vw, 32px);
+}
+.ink-page-heritage .study-photo-figure { margin: 0; }
+.ink-page-heritage .study-photo-layout .study-mark-canvas { border-radius: 8px; }
+.ink-page.ink-page-heritage .study-photo-layout .study-mark-canvas img { height: auto; }
+.ink-page-heritage .study-photo-figure figcaption { margin-top: 8px; color: var(--lp-text-muted); font-size: 13px; line-height: 20px; }
+.ink-page-heritage .study-photo-empty {
+  display: grid;
+  justify-items: center;
+  place-content: center;
+  gap: 8px;
+  min-height: 128px;
+  aspect-ratio: 4 / 5;
+  border: 1px dashed var(--lp-border-strong);
+  border-radius: 8px;
+  background: var(--lp-surface-subtle);
+  color: var(--lp-text-muted);
+  font-size: 13px;
+}
+.ink-page-heritage .study-photo-controls { min-width: 0; }
+.ink-page.ink-page-heritage .study-photo-controls .study-hint { font-size: 13px; line-height: 20px; }
+.ink-page.ink-page-heritage .study-photo-controls :is(.app-select-trigger, input[type='number']) { min-height: 36px; padding-block: 6px; }
+.ink-page.ink-page-heritage .study-photo-controls input[type='number'] { padding-inline: 8px; }
+.ink-page.ink-page-heritage .study-photo-options { margin-top: 0; }
+.ink-page-heritage .study-photo-options > label { min-width: min(184px, 52%); }
+.ink-page.ink-page-heritage .study-photo-options button { min-height: 36px; height: 36px; }
+.ink-page.ink-page-heritage .study-photo fieldset { min-width: 0; margin-top: 12px; padding-top: 0; }
+.ink-page.ink-page-heritage .study-photo legend { padding-right: 8px; }
+.ink-page.ink-page-heritage .study-coordinates { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.ink-page.ink-page-heritage .study-coordinates label { min-width: 0; margin: 10px 0 0; }
+.ink-page-heritage .study-photo-display label { margin-bottom: 0; }
+.ink-page.ink-page-heritage .study-photo-credit { margin-top: 14px; }
+.ink-page.ink-page-heritage .study-photo-credit details { margin-top: 0; padding-top: 0; border: 0; }
+.ink-page-heritage .study-photo-credit summary { overflow-wrap: anywhere; }
+.ink-page-heritage .study-photo-preview-trigger { margin-top: 12px; }
+
+.ink-page-heritage .study-photo-preview-dialog {
+  position: fixed;
+  inset: 0;
+  width: min(1440px, calc(100vw - 40px));
+  max-width: none;
+  max-height: calc(100dvh - 40px);
+  padding: 0;
+  margin: auto;
+  overflow: auto;
+  border: 1px solid var(--lp-border-subtle);
+  border-radius: 16px;
+  background: var(--lp-surface);
+  color: var(--lp-text-strong);
+  box-shadow: 0 16px 48px rgb(39 27 18 / .18);
+}
+.ink-page-heritage .study-photo-preview-dialog::backdrop { background: rgb(43 39 35 / .42); }
+.ink-page-heritage .study-photo-preview-dialog > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 28px;
+  border-bottom: 1px solid var(--lp-border-divider);
+}
+.ink-page-heritage .study-photo-preview-dialog h2 { font: 700 24px/32px var(--heritage-display); }
+.ink-page.ink-page-heritage .study-photo-preview-dialog > header button { min-width: 32px; min-height: 32px; padding: 4px; border: 0; background: transparent; }
+.ink-page-heritage .study-photo-preview-content { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 1fr); align-items: start; gap: 24px; padding: 24px 28px; }
+.ink-page-heritage .study-photo-preview-image { display: grid; align-content: center; min-width: 0; aspect-ratio: 16 / 9; border: 1px solid var(--lp-border-subtle); border-radius: 8px; overflow: hidden; background: var(--lp-surface-subtle); text-align: center; }
+.ink-page-heritage .study-photo-preview-image > p { padding: 12px; color: var(--lp-text-muted); font-size: 14px; }
+.ink-page.ink-page-heritage .study-photo-preview-image > img { margin: 0; border-radius: 0; }
+.ink-page.ink-page-heritage .study-photo-preview-content aside h3 { font: 700 20px/28px var(--heritage-display); }
+.ink-page-heritage .study-photo-preview-content aside :is(dt, p) { color: var(--lp-text-muted); font-size: 13px; line-height: 22px; }
+.ink-page-heritage .study-photo-preview-content aside dd { margin: 0 0 12px; font-size: 14px; line-height: 22px; }
+.ink-page-heritage .study-photo-preview-content aside > button { margin-top: 16px; }
+
+@media (max-width: 1240px) {
+  .ink-page.ink-page-heritage .study-photo-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .ink-page-heritage .study-photo-layout,
+  .ink-page-heritage .study-photo-preview-content { grid-template-columns: minmax(0, 1fr); }
+  .ink-page-heritage .study-photo-preview-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
+  .ink-page-heritage .study-photo-preview-dialog > header, .ink-page-heritage .study-photo-preview-content { padding: 16px; }
+  .ink-page-heritage .study-photo-preview-dialog h2 { font-size: 20px; line-height: 28px; }
+  .ink-page-heritage .study-photo-empty { aspect-ratio: 16 / 9; }
+}
+@media (max-width: 400px) {
+  .ink-page.ink-page-heritage .study-coordinates { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

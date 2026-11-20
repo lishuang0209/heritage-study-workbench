@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import Select from '@/components/Select';
 import React, { useState, useMemo, useCallback } from 'react';
 import { 
   Plus, Trash2, Film, Clock, MapPin, Users, Edit3, Save, X, 
@@ -314,13 +315,14 @@ export default function StoryboardStage({
                                     <td className="px-4 py-3 text-center text-xs font-mono text-gray-400">{shot.shot_number}</td>
                                     <td className="px-4 py-3 text-center">
                                       {isEditing ? (
-                                        <select 
+                                        <Select
+                                          aria-label={`第 ${shot.shot_number} 镜景别`}
                                           value={shot.shot_type} 
                                           onChange={e => updateShotField(epIdx, segIdx, sIdx, 'shot_type', e.target.value)} 
                                           className="w-full bg-white border border-gray-200 rounded text-xs font-bold py-1 px-1 outline-none focus:ring-1 focus:ring-neutral-300"
                                         >
                                           {Object.keys(SHOT_TYPE_DECOR).map(t => <option key={t} value={t}>{t}</option>)}
-                                        </select>
+                                        </Select>
                                       ) : (
                                         <span className={`px-2 py-0.5 rounded text-xs font-black ${decor.bg} ${decor.text}`}>{shot.shot_type}</span>
                                       )}

@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import Select from '@/components/Select';
 import { X } from 'lucide-react';
 import { api, json, type Project, type Shot } from './ink-shared';
 import { previewVideo, videoEditSource } from './wizard-state';
@@ -23,6 +24,7 @@ export default function VideoEditPanel({ project, shot, disabled, onUpdated, onW
   const blocked = disabled || pending;
   const proposal = shot.video_proposal;
   const currentVideoUrl = previewVideo(shot);
+  const sourceVersion = versions.find(version => version.video === source);
   useEffect(() => {
     if (!open) return;
     const el = dialog.current;
@@ -69,12 +71,12 @@ export default function VideoEditPanel({ project, shot, disabled, onUpdated, onW
       <header><h2 id="ink-video-edit-title">基于已有视频调整</h2><button type="button" disabled={pending} onClick={() => onClose()} aria-label="关闭视频调整"><X size={20} /></button></header>
       <form onSubmit={e => { e.preventDefault(); void mutate('preview-video', {video: source, revision: shot.revision, instruction}); }}>
         <div className="ink-wizard-dialog-body">
-          <p>以已生成的视频作为底稿，只描述本次要改的动作；生成候选后对比，再决定是否采用。</p>
-          <label>选择底稿<select value={source} disabled={blocked || loading} onChange={e => setSource(e.target.value)}>
+          <p>选择已生成的视频作底稿，描述要改的动作，生成后对比候选。</p>
+          <label>选择底稿<Select value={source} disabled={blocked || loading} onChange={e => setSource(e.target.value)}>
             {!source ? <option value="">{loading ? '正在加载…' : versions.length ? '请选择底稿' : '暂无视频'}</option> : null}
             {versions.map(v => <option key={v.video} value={v.video}>{v.current ? v.needs_confirmation ? '待确认 · ' : '当前使用 · ' : ''}{label(v)} · {new Date(v.created * 1000).toLocaleString('zh-CN')}</option>)}
-          </select></label>
-          {versions.find(v => v.video === source) ? <video key={source} controls preload="metadata" src={versions.find(v => v.video === source)!.video_url} aria-label="本次视频调整底稿" style={{width:'100%',maxHeight:'45vh'}} /> : null}
+          </Select></label>
+          {sourceVersion ? <video key={source} className="ink-video-edit-preview" controls preload="metadata" src={sourceVersion.video_url} poster={sourceVersion.current && !shot.image_stale ? shot.image_url || undefined : undefined} aria-label="本次视频调整底稿" /> : null}
           <label>只调整哪些动作？<textarea required maxLength={1000} rows={4} disabled={blocked} value={instruction} onChange={e => setInstruction(e.target.value)} placeholder="例如：仅把书生接伞的动作放慢，右手接稳后少女再松手；其余动作、镜头和水墨画风保持。" /></label>
           <p className="ink-wizard-footnote">生成新候选会计费，原视频保留。尽量保持未指定部分，但仍需播放核对。底稿需为2至10秒，声音沿用底稿。</p>
           {proposal ? <p>重新生成会保留上一候选到历史版本。</p> : null}

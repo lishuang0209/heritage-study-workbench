@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import Select from '@/components/Select';
 import React, { useState, useRef, useEffect } from 'react';
 import { Settings2, Clock, ArrowRight, CheckCircle, Trash2, Globe, ListOrdered, Loader2, Film, ImageIcon } from 'lucide-react';
 import clsx from 'clsx';
@@ -615,7 +616,7 @@ export default function HomePage({ onStartProject, onResumeProject, onDeleteSess
               <div className="grid grid-cols-1 gap-3">
                 <label className="flex flex-col gap-1">
                   <span className="text-gray-500 font-medium">风格</span>
-                  <select
+                  <Select
                     value={selectedStyle}
                     onChange={e => setSelectedStyle(e.target.value)}
                     className="bg-white border border-gray-200 rounded-lg px-2.5 py-2 text-gray-700 outline-none"
@@ -623,14 +624,14 @@ export default function HomePage({ onStartProject, onResumeProject, onDeleteSess
                     {styleOptions.map(s => (
                       <option key={s.id} value={s.id}>{s.label}</option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <label className="flex flex-col gap-1">
                   <span className="text-gray-500 font-medium">{requiresVideo ? '视频分辨率' : '分辨率'}</span>
-                  <select
+                  <Select
                     value={selectedResolution}
                     onChange={e => setSelectedResolution(e.target.value)}
                     className="bg-white border border-gray-200 rounded-lg px-2.5 py-2 text-gray-700 outline-none min-h-[40px]"
@@ -638,7 +639,7 @@ export default function HomePage({ onStartProject, onResumeProject, onDeleteSess
                     {VIDEO_RESOLUTIONS.map(item => (
                       <option key={item.id} value={item.id}>{item.label}</option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
                 <label className="flex flex-col gap-1">
                   <span className="text-gray-500 font-medium">{requiresVideo ? '视频长宽比' : '画面比例'}</span>
@@ -686,7 +687,7 @@ export default function HomePage({ onStartProject, onResumeProject, onDeleteSess
                 <div className="grid grid-cols-2 gap-3">
                 <label className="flex flex-col gap-1">
                   <span className="text-gray-500 font-medium">LLM 模型</span>
-                  <select
+                  <Select
                     value={selectedLLM}
                     onChange={e => setSelectedLLM(e.target.value)}
                     className="bg-white border border-gray-200 rounded-lg px-2.5 py-2 text-gray-700 outline-none"
@@ -698,11 +699,11 @@ export default function HomePage({ onStartProject, onResumeProject, onDeleteSess
                         ))}
                       </optgroup>
                     ))}
-                  </select>
+                  </Select>
                 </label>
                 <label className="flex flex-col gap-1">
                   <span className="text-gray-500 font-medium">VLM 评估模型</span>
-                  <select
+                  <Select
                     value={selectedVLM}
                     onChange={e => setSelectedVLM(e.target.value)}
                     className="bg-white border border-gray-200 rounded-lg px-2.5 py-2 text-gray-700 outline-none"
@@ -714,11 +715,11 @@ export default function HomePage({ onStartProject, onResumeProject, onDeleteSess
                         ))}
                       </optgroup>
                     ))}
-                  </select>
+                  </Select>
                 </label>
                 <label className="flex flex-col gap-1">
                   <span className="text-gray-500 font-medium">文生图</span>
-                  <select
+                  <Select
                     value={selectedT2I}
                     onChange={e => setSelectedT2I(e.target.value)}
                     className="bg-white border border-gray-200 rounded-lg px-2.5 py-2 text-gray-700 outline-none"
@@ -730,11 +731,11 @@ export default function HomePage({ onStartProject, onResumeProject, onDeleteSess
                         ))}
                       </optgroup>
                     ))}
-                  </select>
+                  </Select>
                 </label>
                 <label className="flex flex-col gap-1">
                   <span className="text-gray-500 font-medium">图生图</span>
-                  <select
+                  <Select
                     value={selectedI2I}
                     onChange={e => setSelectedI2I(e.target.value)}
                     className="bg-white border border-gray-200 rounded-lg px-2.5 py-2 text-gray-700 outline-none"
@@ -746,12 +747,12 @@ export default function HomePage({ onStartProject, onResumeProject, onDeleteSess
                         ))}
                       </optgroup>
                     ))}
-                  </select>
+                  </Select>
                 </label>
                 {requiresVideo && (<>
                 <label className="flex flex-col gap-1 col-span-2">
                   <span className="text-gray-500 font-medium">视频生成方式</span>
-                  <select
+                  <Select
                     value={selectedVideoMode}
                     onChange={e => setSelectedVideoMode(e.target.value as VideoGenerationMode)}
                     className="bg-white border border-gray-200 rounded-lg px-2.5 py-2 text-gray-700 outline-none"
@@ -759,11 +760,11 @@ export default function HomePage({ onStartProject, onResumeProject, onDeleteSess
                     {VIDEO_GENERATION_MODES.map(item => (
                       <option key={item.id} value={item.id}>{item.label}</option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
                 <label className="flex flex-col gap-1 col-span-2">
                   <span className="text-gray-500 font-medium">{selectedVideoModeLabel}模型</span>
-                  <select
+                  <Select
                     value={activeVideoModel}
                     onChange={e => setActiveVideoModel(e.target.value)}
                     className="bg-white border border-gray-200 rounded-lg px-2.5 py-2 text-gray-700 outline-none"
@@ -775,7 +776,7 @@ export default function HomePage({ onStartProject, onResumeProject, onDeleteSess
                         ))}
                       </optgroup>
                     ))}
-                  </select>
+                  </Select>
                 </label>
                 </>)}
                 <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
