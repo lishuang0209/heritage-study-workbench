@@ -124,11 +124,12 @@ def test_templates_support_single_target_and_optional_detail_confirmation(setup,
         assert client.post(f"/api/ink/projects/{p['id']}/heritage/confirm",json={'version':p['heritage_version'],'teacher_verified':True}).status_code==422
 
 
-def test_foreign_asset_cross_slot_revision_and_readonly_guards(setup):
+def test_foreign_asset_cross_slot_revision_and_readonly_guards(setup, monkeypatch):
     store,client=setup;p=prepared(setup);base=f"/api/ink/projects/{p['id']}"
     station=p['heritage_station'];station['panorama']['image']='other.jpg'
     assert client.put(base+'/heritage/station',json={'version':p['heritage_version'],'station':clean(station)}).status_code==422
     assert client.put(base+'/heritage/station',json={'version':999,'station':clean(station)}).status_code==409
+    monkeypatch.setenv('SFA_INK_SHARED_PROJECT_IDS', p['id'])
     assert client.post('/api/ink/login',json={'token':'bob-test'}).status_code==200
     assert client.get(base).status_code==200
     assert client.post(base+'/heritage/confirm',json={'version':p['heritage_version'],'teacher_verified':True}).status_code==403
@@ -347,10 +348,11 @@ def test_existing_photo_credits_are_recovered_once_and_marks_are_preserved(setup
     assert repeated['heritage_version']==q['heritage_version']
 
 
-def test_existing_manual_credits_and_readonly_projects_are_not_overwritten(setup):
+def test_existing_manual_credits_and_readonly_projects_are_not_overwritten(setup, monkeypatch):
     _,client=setup;p=prepared(setup);base=f"/api/ink/projects/{p['id']}/heritage/photo-credits"
     q=client.post(base,json={'version':p['heritage_version']}).json()
     assert q['heritage_station']==p['heritage_station'] and q['heritage_version']==p['heritage_version']
+    monkeypatch.setenv('SFA_INK_SHARED_PROJECT_IDS', p['id'])
     client.post('/api/ink/login',json={'token':'bob-test'})
     assert client.post(base,json={'version':p['heritage_version']}).status_code==403
 
@@ -427,7 +429,7 @@ def test_derived_mark_is_locked_and_uploads_cannot_forge_an_automatic_link(setup
     assert client.post(base+'/heritage/confirm',json={'version':p['heritage_version'],'teacher_verified':True}).status_code==422
 
 
-def test_detail_generation_guards_missing_marks_versions_readonly_and_credits_follow_source(setup):
+def test_detail_generation_guards_missing_marks_versions_readonly_and_credits_follow_source(setup, monkeypatch):
     _,client=setup;p=create(client);base=f"/api/ink/projects/{p['id']}"
     assert client.post(base+'/heritage/detail-from-mark',json={'version':0}).status_code==422
     p=prepared(setup);base=f"/api/ink/projects/{p['id']}"
@@ -436,6 +438,7 @@ def test_detail_generation_guards_missing_marks_versions_readonly_and_credits_fo
     station=p['heritage_station'];station['panorama'].update(credit_kind='self');p=save(client,p,station)
     assert p['heritage_station']['detail']['source']==p['heritage_station']['panorama']['source']
     assert p['heritage_station']['detail']['mark'] is not None
+    monkeypatch.setenv('SFA_INK_SHARED_PROJECT_IDS', p['id'])
     client.post('/api/ink/login',json={'token':'bob-test'})
     assert client.post(base+'/heritage/detail-from-mark',json={'version':p['heritage_version']}).status_code==403
 

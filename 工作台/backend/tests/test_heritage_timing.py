@@ -53,10 +53,11 @@ def test_invalid_timing_does_not_change_saved_content(setup,timing):
     assert store.load(p['id'])==before
 
 
-def test_timing_version_and_readonly_guards(setup):
+def test_timing_version_and_readonly_guards(setup, monkeypatch):
     _,client=setup;p=prepared(setup);base=f"/api/ink/projects/{p['id']}/heritage/timing"
     timing={'intro':20,'location':15,'task':10};change_timing(client,p,timing)
     assert client.put(base,json={'version':0,'timing':timing}).status_code==409
+    monkeypatch.setenv('SFA_INK_SHARED_PROJECT_IDS', p['id'])
     client.post('/api/ink/login',json={'token':'bob-test'})
     assert client.put(base,json={'version':1,'timing':timing}).status_code==403
 

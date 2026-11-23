@@ -37,6 +37,7 @@ def setup(tmp_path, monkeypatch):
         monkeypatch.setattr(Config, name, 'test-image-key')
     store = Store(tmp_path)
     monkeypatch.setenv('SFA_INK_TRIAL_MODE', '1')
+    monkeypatch.delenv('SFA_INK_SHARED_PROJECT_IDS', raising=False)
     monkeypatch.setattr(api, 'store', store)
     monkeypatch.setenv('SFA_INK_INVITES', json.dumps([
         {'token': 'alice-test', 'user': 'alice', 'limits': dict(text=2, vl=2, image=2, video=2, speech=2)},
@@ -93,10 +94,39 @@ def test_auth_required_and_bad_origin(setup):
     assert client.get('/api/ink/projects').status_code == 401
 
 
-def test_source_readonly_clone_separate_files(setup):
+def test_private_trial_project_is_hidden_from_other_invitees(setup):
+    store, client = setup
+    own = project(store)
+    store.asset(own['id'], 'image.png').write_bytes(b'own fixture')
+    other = project(store, 'bob')
+    store.asset(other['id'], 'image.png').write_bytes(b'other fixture')
+    own_url = f'/api/ink/projects/{own["id"]}'
+    other_url = f'/api/ink/projects/{other["id"]}'
+
+    assert [item['id'] for item in client.get('/api/ink/projects').json()['projects']] == [own['id']]
+    assert client.get(own_url).status_code == 200
+    assert client.get(own_url + '/assets/image.png').content == b'own fixture'
+    assert client.get(other_url).status_code == 404
+    assert client.get(other_url + '/assets/image.png').status_code == 404
+    assert client.delete(other_url).status_code == 404
+    assert client.post(other_url + '/clone').status_code == 404
+
+    assert client.post('/api/ink/login', json={'token': 'bob-test'}).status_code == 200
+    assert [item['id'] for item in client.get('/api/ink/projects').json()['projects']] == [other['id']]
+    assert client.get(other_url + '/assets/image.png').content == b'other fixture'
+    assert client.get(own_url + '/assets/image.png').status_code == 404
+
+
+def test_source_readonly_clone_separate_files(setup, monkeypatch):
     store, client = setup
     source = project(store, 'bob')
+    private = project(store, 'bob')
+    monkeypatch.setenv('SFA_INK_SHARED_PROJECT_IDS', source['id'])
     (store.folder(source['id']) / 'image.png').write_bytes(b'fixture')
+    assert [item['id'] for item in client.get('/api/ink/projects').json()['projects']] == [source['id']]
+    assert client.get(f'/api/ink/projects/{source["id"]}').status_code == 200
+    assert client.get(f'/api/ink/projects/{source["id"]}/assets/image.png').content == b'fixture'
+    assert client.get(f'/api/ink/projects/{private["id"]}').status_code == 404
     body = {k: source['shots'][0][k] for k in ('content', 'scene', 'camera', 'motion', 'character_ids', 'dialogues')}
     assert client.patch(f'/api/ink/projects/{source["id"]}/shots/s1', json=body).status_code == 403
     response = client.post(f'/api/ink/projects/{source["id"]}/clone')
@@ -998,7 +1028,7 @@ def test_delete_shot_rejects_stale_missing_and_last_shot(setup):
     assert [s['id'] for s in store.load(p['id'])['shots']] == ['s4']
 
 
-def test_delete_and_restore_respect_busy_and_readonly_projects(setup):
+def test_delete_and_restore_respect_busy_and_readonly_projects(setup, monkeypatch):
     store, client = setup
     p = project(store)
     base = f'/api/ink/projects/{p["id"]}'
@@ -1010,6 +1040,7 @@ def test_delete_and_restore_respect_busy_and_readonly_projects(setup):
     assert client.post(restore).status_code == 409
     assert store.load(p['id']) == original
     store.finish(jid)
+    monkeypatch.setenv('SFA_INK_SHARED_PROJECT_IDS', p['id'])
     assert client.post('/api/ink/login', json={'token': 'bob-test'}).status_code == 200
     assert client.request('DELETE', base + '/shots/s2', json={'revision': 1}).status_code == 403
     assert client.post(restore).status_code == 403
@@ -1266,7 +1297,7 @@ def test_add_shot_allows_first_manual_shot_and_enforces_six_shot_limit(setup):
     assert client.post(base + '/confirm-storyboard').status_code == 200
 
 
-def test_add_shot_respects_readonly_and_busy_guards(setup):
+def test_add_shot_respects_readonly_and_busy_guards(setup, monkeypatch):
     store, client = setup
     p = project(store)
     base = f'/api/ink/projects/{p["id"]}'
@@ -1276,6 +1307,7 @@ def test_add_shot_respects_readonly_and_busy_guards(setup):
     assert client.post(base + '/shots', json=body).status_code == 409
     assert store.load(p['id']) == before
     store.finish(jid)
+    monkeypatch.setenv('SFA_INK_SHARED_PROJECT_IDS', p['id'])
     assert client.post('/api/ink/login', json={'token': 'bob-test'}).status_code == 200
     assert client.post(base + '/shots', json=body).status_code == 403
     assert store.load(p['id']) == before
@@ -1796,7 +1828,7 @@ def test_video_automatically_adds_sound_and_preserves_clip_on_speech_failure(set
         assert result['rendered'] and result['media_step'] == 'complete'
 
 
-def test_video_history_is_shot_scoped_and_includes_legacy_and_retry_renders(setup):
+def test_video_history_is_shot_scoped_and_includes_legacy_and_retry_renders(setup, monkeypatch):
     store, client = setup
     p = project(store)
     shot = p['shots'][0]
@@ -1824,8 +1856,9 @@ def test_video_history_is_shot_scoped_and_includes_legacy_and_retry_renders(setu
     assert selected['video'] == 'current.mp4'
     assert selected['needs_confirmation'] is True
     assert client.get(f"/api/ink/projects/{p['id']}/shots/missing/video-history").status_code == 404
+    monkeypatch.setenv('SFA_INK_SHARED_PROJECT_IDS', p['id'])
     assert client.post('/api/ink/login', json={'token': 'bob-test'}).status_code == 200
-    assert client.get(base+'/video-history').status_code == 200  # Trial projects allow read-only viewing.
+    assert client.get(base+'/video-history').status_code == 200  # Shared trial demos allow read-only viewing.
     client.cookies.clear()
     assert client.get(base+'/video-history').status_code == 401
 
@@ -1932,6 +1965,7 @@ def test_adopt_video_uses_selected_artifact_without_regeneration(setup, monkeypa
     body.update(video='dub.mp4', revision=selected['revision'], current_clip='old.mp4')
     adopted_dub = client.post(base+'/adopt-video', json=body).json()['shots'][0]
     assert adopted_dub['rendered'] == 'dub.mp4'
+    monkeypatch.setenv('SFA_INK_SHARED_PROJECT_IDS', p['id'])
     assert client.post('/api/ink/login', json={'token':'bob-test'}).status_code == 200
     assert client.post(base+'/adopt-video', json=body).status_code == 403
 
@@ -1981,7 +2015,7 @@ def spatial_pair(store):
     return p
 
 
-def test_scene_layout_save_freezes_reference_and_preserves_existing_results(setup):
+def test_scene_layout_save_freezes_reference_and_preserves_existing_results(setup, monkeypatch):
     store, client = setup
     p = spatial_pair(store)
     base = f"/api/ink/projects/{p['id']}"
@@ -2008,6 +2042,7 @@ def test_scene_layout_save_freezes_reference_and_preserves_existing_results(setu
     assert store.asset(p['id'], 'correct.png').read_bytes() == b'keep image'
     assert saved['scene_layouts'] == client.get(base).json()['scene_layouts']
     assert client.put(base+'/scene-layouts',json=body).status_code == 409
+    monkeypatch.setenv('SFA_INK_SHARED_PROJECT_IDS', p['id'])
     assert client.post('/api/ink/login',json={'token':'bob-test'}).status_code == 200
     assert client.put(base+'/scene-layouts',json={**body,'version':1}).status_code == 403
 
@@ -2172,6 +2207,7 @@ def test_video_edit_guards_source_busy_revision_blank_and_readonly(setup, monkey
     jid = store.enqueue(p['id'], 'alice', 'video')
     assert client.post(base+'/preview-video',json=body).status_code == 409
     store.finish(jid)
+    monkeypatch.setenv('SFA_INK_SHARED_PROJECT_IDS', p['id'])
     client.post('/api/ink/login',json={'token':'bob-test'})
     assert client.post(base+'/preview-video',json=body).status_code == 403
 

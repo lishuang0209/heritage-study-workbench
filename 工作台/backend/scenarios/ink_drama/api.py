@@ -192,11 +192,21 @@ def identity(request: Request):
     raise HTTPException(401, '请输入负责人提供的试用邀请码')
 
 
+def shared_project_ids():
+    return {project_id.strip() for project_id in os.environ.get('SFA_INK_SHARED_PROJECT_IDS', '').split(',') if project_id.strip()}
+
+
+def project_is_visible(p, user, shared_ids):
+    return not user.get('trial_mode', True) or p['owner'] == user['id'] or p['id'] in shared_ids
+
+
 def access(pid, user, write=False, idle=True):
     try:
         p = store.load(pid)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
+    if not project_is_visible(p, user, shared_project_ids()):
+        raise HTTPException(404, '项目不存在')
     if user.get('trial_mode', True) and store.ended(p['owner']) and __import__('time').time() >= store.ended(p['owner']) + 7 * 86400:
         raise HTTPException(410, '项目已到保留期限')
     if write:
@@ -650,7 +660,10 @@ class NewProject(BaseModel):
 @router.get('/projects')
 def list_projects(user=Depends(identity)):
     items = []
+    shared_ids = shared_project_ids()
     for p in store.list():
+        if not project_is_visible(p, user, shared_ids):
+            continue
         if user.get('trial_mode', True) and store.ended(p['owner']) and __import__('time').time() >= store.ended(p['owner']) + 7 * 86400:
             continue
         shots = p.get('shots') or []

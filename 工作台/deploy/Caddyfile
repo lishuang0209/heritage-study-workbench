@@ -1,0 +1,19 @@
+{$SITE_DOMAIN} {
+	encode zstd gzip
+
+	@home path /
+	redir @home /heritage 302
+
+	handle /api/ink/* {
+		reverse_proxy backend:8000
+	}
+
+	@pages path /heritage /ink /_next/* /heritage-home/* /heritage-landing/* /ink-styles/* /ui/* /favicon.ico
+	handle @pages {
+		reverse_proxy frontend:3000
+	}
+
+	handle {
+		respond 404
+	}
+}

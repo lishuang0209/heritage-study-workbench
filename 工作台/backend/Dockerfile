@@ -3,7 +3,7 @@ FROM python:3.12-slim
 
 # ffmpeg: clip concatenation and audio/video post-processing.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /usr/local/bin/uv

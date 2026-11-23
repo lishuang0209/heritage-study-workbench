@@ -8,3 +8,5 @@ code
 temp
 logs
 .env
+.env*
+.ink-demo

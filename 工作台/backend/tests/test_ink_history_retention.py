@@ -64,10 +64,11 @@ def test_current_candidate_and_wrong_shot_image_deletions_are_rejected(setup):
 
 
 @pytest.mark.parametrize('block',['owner','ended','busy'])
-def test_history_delete_and_restore_enforce_write_access_and_idle_state(setup,block):
+def test_history_delete_and_restore_enforce_write_access_and_idle_state(setup,block, monkeypatch):
     store,client,p,shot,history,deletion=image_history(setup)
     assert client.delete(deletion).status_code == 200
     if block=='owner':
+        monkeypatch.setenv('SFA_INK_SHARED_PROJECT_IDS', p['id'])
         assert client.post('/api/ink/login',json={'token':'bob-test'}).status_code == 200
     elif block=='ended':
         assert client.post('/api/ink/end-trial').status_code == 200

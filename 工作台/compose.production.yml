@@ -1,0 +1,54 @@
+name: heritage-study
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      SFA_HOST: 0.0.0.0
+      SFA_PORT: "8000"
+      SFA_INK_PUBLIC: "1"
+      SFA_INK_TRIAL_MODE: "1"
+      SFA_INK_ORIGIN: "https://${SITE_DOMAIN:?设置 SITE_DOMAIN}"
+      SFA_INK_DATA_DIR: /var/lib/heritage
+    volumes:
+      - heritage-data:/var/lib/heritage
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ink/mode', timeout=3).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        BACKEND_API_URL: http://backend:8000
+        INK_BACKEND_API_URL: http://backend:8000
+        NEXT_PUBLIC_APP_NAME: 古建研学水墨短片工作台
+        NEXT_PUBLIC_APP_TAGLINE: 制作研学短片与观察任务卡
+    restart: unless-stopped
+
+  gateway:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      SITE_DOMAIN: "${SITE_DOMAIN:?设置 SITE_DOMAIN}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - https-data:/data
+      - https-config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+
+volumes:
+  heritage-data:
+  https-data:
+  https-config:

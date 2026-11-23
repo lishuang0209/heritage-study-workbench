@@ -107,10 +107,12 @@ def test_material_preview_never_writes_current_project_or_calls_models(setup,mon
 
 
 @pytest.mark.parametrize('block',['owner','ended','busy','version','ink','unauthenticated'])
-def test_preview_respects_project_type_permissions_busy_and_saved_revision(setup,block):
+def test_preview_respects_project_type_permissions_busy_and_saved_revision(setup,block, monkeypatch):
     store,client=setup;p=create(client);version=0
     expected=403
-    if block=='owner':client.post('/api/ink/login',json={'token':'bob-test'})
+    if block=='owner':
+        monkeypatch.setenv('SFA_INK_SHARED_PROJECT_IDS', p['id'])
+        client.post('/api/ink/login',json={'token':'bob-test'})
     elif block=='ended':client.post('/api/ink/end-trial')
     elif block=='busy':store.enqueue(p['id'],'alice','split');expected=409
     elif block=='version':version=99;expected=409

@@ -6,6 +6,7 @@ __pycache__/
 
 # Local secrets and runtime data
 .env
+.env.production
 backend/config.yaml
 backend/registry/models.local.yaml
 backend/code/
