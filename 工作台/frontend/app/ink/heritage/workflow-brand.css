@@ -216,7 +216,7 @@
   background: var(--heritage-field);
 }
 
-.ink-page-heritage .ink-history-grid :is(img, video) {
+.ink-page-heritage .ink-history-grid :is(img, video, .ink-history-play) {
   height: auto;
   max-height: 320px;
   aspect-ratio: 16/9;
@@ -224,6 +224,8 @@
 }
 .ink-page-heritage .ink-history-grid img { background: var(--lp-surface-soft); }
 .ink-page-heritage .ink-history-grid video { background: var(--lp-action-primary); }
+.ink-page-heritage .ink-history-grid .ink-history-play { background: var(--lp-surface-soft); color: var(--heritage-accent); }
+.ink-page-heritage .ink-history-grid .ink-history-play:hover { background: var(--lp-border-subtle); }
 .ink-page-heritage :is(.ink-history-badge, .ink-history-grid small, .ink-history-removed > summary, .ink-history-removed > p) {
   color: var(--lp-text-muted);
 }

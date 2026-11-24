@@ -376,7 +376,7 @@ class Store:
         return cid
 
     def record_call(self, owner, kind, pid):
-        """Record manually initiated local calls without enforcing trial quotas."""
+        """Record a model call in a workspace without per-user quotas."""
         cid = uuid.uuid4().hex
         with self.db() as db:
             db.execute('INSERT INTO calls VALUES(?,?,?,?,?,?)',

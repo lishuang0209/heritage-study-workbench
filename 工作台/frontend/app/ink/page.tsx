@@ -11,7 +11,6 @@ import HeritageHome, { HeritageHeader } from './heritage/HeritageHome';
 import HeritageWorkspace from './heritage/HeritageWorkspace';
 import './heritage/heritage.css';
 import './heritage/workflow-brand.css';
-import type { Station } from './heritage/state';
 import { api, json, names, type Me, type Summary, type Project, type Track } from './ink-shared';
 
 export default function InkPage() {
@@ -80,7 +79,6 @@ export default function InkPage() {
   const updateProject = (updated: Project) => { setProject(updated); return updated; };
   const readonly = Boolean(me?.trial_mode && (project?.owner !== me?.id || me?.ended));
   const studyProjects = projects.filter(item => item.project_type === 'heritage' && !item.archived);
-  const baoguoExample = projects.find(item => item.id === '81ba6cf4f7f944ee80467852db0c6c71');
   const current = project;
   const wizard = (onExport?:()=>void) => current ? <InkWizard key={current.id} project={current} tracks={tracks} readonly={readonly} onWorkingChange={setWorking} onExport={onExport}
               onAction={action} onUpdated={updateProject}
@@ -92,17 +90,11 @@ export default function InkPage() {
               onClone={async () => { const copy = await api<Project>(`/projects/${current.id}/clone`, { method: 'POST' }); setProject(copy); await refresh(); }}
             /> : null;
   const createStudy = async (caseId: string) => {
-    if (caseId === 'baoguo' && baoguoExample) {
-      const copy = await api<Project>(`/projects/${baoguoExample.id}/clone`, { method: 'POST' });
-      setProject(copy);
-      await refresh();
-      return;
-    }
-    const data = await api<{templates:{id:string;title:string;station:Partial<Station>}[]}>('/heritage/templates');
-    const example = data.templates.find(x=>x.id===caseId);
-    let created = await api<Project>('/projects',json('POST',{project_type:'heritage',title:example?.title||'新建古建讲解站',script:'研学故事待老师编辑与确认。'}));
-    if(example) created=await api<Project>(`/projects/${created.id}/heritage/station`,json('PUT',{version:0,station:example.station}));
-    setProject(created);await refresh();
+    const created = caseId
+      ? await api<Project>(`/heritage/templates/${encodeURIComponent(caseId)}`, { method: 'POST' })
+      : await api<Project>('/projects', json('POST', { project_type: 'heritage', title: '新建古建讲解站', script: '研学故事待老师编辑与确认。' }));
+    setProject(created);
+    await refresh();
   };
   const account = me?.trial_mode ? <div className="text-xs text-neutral-500 space-y-2 shrink-0">
     <p>{me.local ? '本机开发试用' : '受邀试用'} · {me.id}</p>
@@ -116,7 +108,7 @@ export default function InkPage() {
   const problem = error ? <p role="alert" className="heritage-workspace-alert">{error}</p> : null;
   const loading = !loaded ? <p role="status">正在加载工作台…</p> : null;
 
-  const trialOverview = me?.trial_mode ? <>
+  const trialOverview = me?.trial_mode && !me.direct_generation ? <>
     <div className="flex flex-wrap gap-3 text-xs mb-6">
       {(['text', 'vl', 'image', 'video', 'speech'] as const).map(kind => <span key={kind} className="border rounded-md px-3 py-2 bg-white">
         {names[kind]} {me.usage[kind] || 0} / {me.limits[kind] || 0}次

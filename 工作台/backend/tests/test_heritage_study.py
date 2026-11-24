@@ -124,6 +124,54 @@ def test_templates_support_single_target_and_optional_detail_confirmation(setup,
         assert client.post(f"/api/ink/projects/{p['id']}/heritage/confirm",json={'version':p['heritage_version'],'teacher_verified':True}).status_code==422
 
 
+def test_invite_can_copy_the_complete_baoguo_template_without_accessing_original(setup, monkeypatch):
+    store, client = setup
+    source = prepared(setup)
+    source_id = source['id']
+    stored = store.load(source_id)
+    stored.update(final='study.mp4', task_card='task.pdf', shots=[{
+        'id': 'shot-1', 'image': 'frame.png', 'rendered': 'clip.mp4',
+        'image_versions': ['earlier.png'],
+    }], final_media_format={'ratio': '16:9', 'width': 1280, 'height': 720})
+    stored['heritage_export_stamp'] = snapshot(stored)
+    for name in ('study.mp4', 'task.pdf', 'frame.png', 'clip.mp4', 'earlier.png'):
+        store.asset(source_id, name).write_bytes(name.encode())
+    store.save(stored)
+    monkeypatch.setenv('SFA_INK_PUBLIC', '1')
+    monkeypatch.setenv('SFA_INK_HERITAGE_BAOGUO_PROJECT_ID', source_id)
+    url = '/api/ink/heritage/templates/baoguo'
+    assert client.post('/api/ink/logout').status_code == 200
+    assert client.post(url).status_code == 401
+    assert client.post('/api/ink/login', json={'token': 'bob-test'}).status_code == 200
+    assert client.get(f'/api/ink/projects/{source_id}').status_code == 404
+    response = client.post(url)
+    assert response.status_code == 200, response.text
+    clone = response.json()
+    assert clone['owner'] == 'bob' and clone['id'] != source_id
+    assert clone['heritage_ready'] and clone['heritage_script'] == source['heritage_script']
+    assert client.get(clone['final_url']).content == b'study.mp4'
+    assert client.get(clone['task_card_url']).content == b'task.pdf'
+    assert client.get(clone['shots'][0]['rendered_url']).content == b'clip.mp4'
+    assert store.asset(clone['id'], 'earlier.png').read_bytes() == b'earlier.png'
+    store.asset(clone['id'], 'earlier.png').write_bytes(b'copy only')
+    assert store.asset(source_id, 'earlier.png').read_bytes() == b'earlier.png'
+    assert not store.usage('bob')
+
+    store.asset(source_id, 'task.pdf').unlink()
+    ids = {p['id'] for p in store.list()}
+    assert client.post(url).status_code == 503
+    assert {p['id'] for p in store.list()} == ids
+
+
+def test_other_case_template_starts_with_station_prefilled(setup):
+    _, client = setup
+    response = client.post('/api/ink/heritage/templates/ningyuan')
+    assert response.status_code == 200
+    assert response.json()['heritage_station']['component'] == '石狮柱础'
+    assert response.json()['heritage_version'] == 1
+    assert client.post('/api/ink/heritage/templates/unknown').status_code == 404
+
+
 def test_foreign_asset_cross_slot_revision_and_readonly_guards(setup, monkeypatch):
     store,client=setup;p=prepared(setup);base=f"/api/ink/projects/{p['id']}"
     station=p['heritage_station'];station['panorama']['image']='other.jpg'

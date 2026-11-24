@@ -1,6 +1,6 @@
 import type { HeritageFields } from './heritage/state';
 export type Kind = 'text' | 'vl' | 'image' | 'video' | 'speech';
-export type Me = { trial_mode: boolean; id: string; local: boolean; limits: Record<Kind, number>; usage: Partial<Record<Kind, number>>; ended: number | null; models: Record<string, string> };
+export type Me = { trial_mode: boolean; direct_generation?: boolean; id: string; local: boolean; limits: Record<Kind, number>; usage: Partial<Record<Kind, number>>; ended: number | null; models: Record<string, string> };
 export type InkCaption = {
   characters: { character_id: string | null; desc: string; visibility: string; match_status: string }[];
   scene: { description: string; light_direction: string };

@@ -37,6 +37,8 @@ def setup(tmp_path, monkeypatch):
         monkeypatch.setattr(Config, name, 'test-image-key')
     store = Store(tmp_path)
     monkeypatch.setenv('SFA_INK_TRIAL_MODE', '1')
+    monkeypatch.delenv('SFA_INK_PUBLIC', raising=False)
+    monkeypatch.delenv('SFA_INK_INVITE_REAL_GENERATION', raising=False)
     monkeypatch.delenv('SFA_INK_SHARED_PROJECT_IDS', raising=False)
     monkeypatch.setattr(api, 'store', store)
     monkeypatch.setenv('SFA_INK_INVITES', json.dumps([
@@ -235,7 +237,8 @@ def test_busy_project_rejects_edits(setup):
     assert client.patch(f'/api/ink/projects/{p["id"]}/shots/s1', json=body).status_code == 409
 
 
-def test_complete_api_pipeline_with_explicit_fake_providers(setup, monkeypatch):
+@pytest.mark.parametrize('direct_generation', [False, True])
+def test_complete_api_pipeline_with_explicit_fake_providers(setup, monkeypatch, direct_generation):
     """Fixture responses test wiring only; they are never exposed as real generations."""
     store, client = setup
     from PIL import Image
@@ -263,7 +266,14 @@ def test_complete_api_pipeline_with_explicit_fake_providers(setup, monkeypatch):
             target.write_bytes(b'FAKE FINAL - TEST ONLY')
     monkeypatch.setattr(api, 'providers', Fake())
     monkeypatch.setattr(api, 'pool', Immediate())
-    monkeypatch.setenv('SFA_INK_INVITES', json.dumps([{'token': 'alice-test', 'user': 'alice', 'limits': dict(text=1, vl=1, image=4, video=4, speech=0)}]))
+    invite = {'token': 'alice-test', 'user': 'alice'}
+    if direct_generation:
+        monkeypatch.setenv('SFA_INK_PUBLIC', '1')
+        monkeypatch.setenv('SFA_INK_INVITE_REAL_GENERATION', '1')
+    else:
+        invite['limits'] = dict(text=1, vl=1, image=4, video=4, speech=0)
+    monkeypatch.setenv('SFA_INK_INVITES', json.dumps([invite]))
+    assert client.get('/api/ink/me').json()['direct_generation'] is direct_generation
     created = client.post('/api/ink/projects', json={'title': '接口测试', 'script': '测试剧本'}).json()
     pid = created['id']
     base = f'/api/ink/projects/{pid}'
@@ -314,6 +324,7 @@ def test_public_mode_blocks_original_api_and_local_login(setup, monkeypatch):
     _, client = setup
     from api.app import app
     monkeypatch.setenv('SFA_INK_PUBLIC', '1')
+    monkeypatch.setenv('SFA_INK_INVITE_REAL_GENERATION', '1')
     public_client = TestClient(app)
     assert public_client.get('/api/config').status_code == 403
     assert public_client.get('/api/project/example/status').status_code == 403
@@ -322,8 +333,34 @@ def test_public_mode_blocks_original_api_and_local_login(setup, monkeypatch):
     assert public_client.get('/api/ink/projects').status_code == 401
     assert public_client.post('/api/ink/login', json={'token': 'alice-test'}).status_code == 200
     assert public_client.get('/api/ink/projects').status_code == 200
+    assert public_client.get('/api/ink/settings').status_code == 403
     monkeypatch.setenv('SFA_INK_INVITES', '[]')
     assert public_client.post('/api/ink/login', json={'token': ''}).status_code == 401
+
+
+def test_direct_generation_preserves_access_and_counts_provider_failures(setup, monkeypatch):
+    store, client = setup
+    monkeypatch.setenv('SFA_INK_INVITE_REAL_GENERATION', '1')
+    assert client.get('/api/ink/me').json()['direct_generation'] is False
+    monkeypatch.setenv('SFA_INK_PUBLIC', '1')
+    p = project(store)
+    token = client.cookies.get('ink_trial')
+    request = type('InviteRequest', (), {'headers': {}, 'cookies': {'ink_trial': token}})()
+    user = api.identity(request)
+    assert user['direct_generation'] is True
+
+    def unavailable():
+        raise UserError('模型服务暂时不可用')
+
+    with pytest.raises(UserError, match='模型服务暂时不可用'):
+        api.call(user, 'speech', p['id'], unavailable)
+    with store.db() as db:
+        assert db.execute('SELECT state FROM calls').fetchone()['state'] == 'failed_or_unknown'
+    assert client.get('/api/ink/me').json()['usage'] == {'speech': 1}
+    assert client.post('/api/ink/end-trial').status_code == 200
+    assert client.post(f'/api/ink/projects/{p["id"]}/actions/split').status_code == 403
+    assert client.post('/api/ink/login', json={'token': 'bob-test'}).status_code == 200
+    assert client.get(f'/api/ink/projects/{p["id"]}').status_code == 404
 
 
 def test_quota_reservation_is_atomic(tmp_path):

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Select from '@/components/Select';
-import { ArrowLeft, ArrowRight, Check, Film, LoaderCircle, Settings2, Upload, X, Trash2, RotateCcw } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Film, LoaderCircle, Play, Settings2, Upload, X, Trash2, RotateCcw } from 'lucide-react';
 import { api, json, type Project, type Shot, type InkCaption, type Track, type DeletedShot } from './ink-shared';
 import { nextShotStep, adjustmentPlan, wizardStepsFor, setupStageFor, storyboardStageFor, wizardStorageKey, restoredWizardStage, unlockedStage, resumeStage, referenceShot, imageReady, imageGenerationPlan, clipReady, soundReady, previewVideo } from './wizard-state';
 import JobStatus from './JobStatus';
@@ -94,6 +94,7 @@ export default function InkWizard({ project: p, tracks, readonly, onWorkingChang
   const [historyItems, setHistoryItems] = useState<(HistoryMeta & { image: string; image_url: string; created: number; status: string; has_snapshot: boolean })[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [videoHistoryItems, setVideoHistoryItems] = useState<(HistoryMeta & {video: string; video_url: string; created: number; kind: string; current: boolean; needs_confirmation?: boolean})[]>([]);
+  const [historyPreview, setHistoryPreview] = useState<string | null>(null);
   const [historyMessage,setHistoryMessage] = useState('');
   const [editMode, setEditMode] = useState<'detail' | 'redesign' | 'style'>('redesign');
   const [detailInstruction, setDetailInstruction] = useState('');
@@ -152,6 +153,7 @@ export default function InkWizard({ project: p, tracks, readonly, onWorkingChang
   const openHistory = async () => {
     if (!shot) return;
     const videos = stage === 4;
+    setHistoryPreview(null);
     setModal(videos ? 'video-history' : 'history'); setHistoryItems([]); setVideoHistoryItems([]); setHistoryLoading(true); setError(''); setHistoryMessage('');
     try {
       if (videos) {
@@ -176,6 +178,7 @@ export default function InkWizard({ project: p, tracks, readonly, onWorkingChang
     } else {
       const data=await api<{videos:typeof videoHistoryItems}>(`/projects/${p.id}/shots/${shot.id}/video-history?include_deleted=true`);
       setVideoHistoryItems(data.videos);
+      if (!restore) setHistoryPreview(current => current === name ? null : current);
     }
     setHistoryMessage(restore?'已恢复到历史列表，当前使用的版本保持不变。':'已移到“已删除版本”，可随时恢复。');
   });
@@ -407,8 +410,12 @@ export default function InkWizard({ project: p, tracks, readonly, onWorkingChang
     {modal === 'video-history' ? <AdjustmentDialog title={`第 ${shot ? p.shots.indexOf(shot) + 1 : ''} 镜 · 历史视频`} layout="history" close={() => {if(!pending)setModal(null);}}><div className="ink-wizard-dialog-body">
       <p>采用时保留该版本的声音。删除后可恢复，正在使用的视频和底稿不能删除。</p>
       {historyMessage?<p role="status" className="ink-history-feedback">{historyMessage}</p>:null}
-      {historyLoading?<p role="status">正在加载视频…</p>:<HistoryVersions items={videoHistoryItems} itemKey={item=>item.video} renderItem={item=><>
-        <video controls preload="metadata" src={item.video_url} aria-label="历史视频预览"/>
+      {historyLoading?<p role="status">正在加载版本列表…</p>:<HistoryVersions items={videoHistoryItems} itemKey={item=>item.video} renderItem={item=><>
+        {historyPreview === item.video ?
+          <video controls autoPlay playsInline src={item.video_url} aria-label="历史视频预览" /> :
+          <button type="button" className="ink-history-play" onClick={() => setHistoryPreview(item.video)}>
+            <Play size={24} aria-hidden="true" />播放预览
+          </button>}
         <div className="ink-history-meta"><strong>{item.kind==='edited'?'局部调整版':item.kind==='subtitled'?'配音字幕版':'原视频'}</strong>
           {item.deleted_at?<HistoryBadge state="deleted">已删除</HistoryBadge>:item.current?<HistoryBadge state={item.needs_confirmation?'pending':'using'}>{item.needs_confirmation?'待确认':'正在使用'}</HistoryBadge>:item.can_delete===false?<HistoryBadge state="reference">底稿使用中</HistoryBadge>:null}
         </div><small>{new Date(item.created*1000).toLocaleString('zh-CN')}</small>

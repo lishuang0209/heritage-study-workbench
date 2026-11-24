@@ -1,11 +1,12 @@
 import copy
 import io
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Literal
 
-from fastapi import Depends, File, HTTPException, UploadFile
+from fastapi import Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -20,6 +21,7 @@ from .detail_crop import crop_detail
 from .timing import Timing, timing_for
 from .material_import import extract_material, MAX_FILE_BYTES
 
+LOCAL_BAOGUO_PROJECT_ID = '81ba6cf4f7f944ee80467852db0c6c71'
 
 class SaveStation(Strict):
     version: int = Field(ge=0)
@@ -99,6 +101,53 @@ def install(api):
     @api.router.get('/heritage/templates')
     def templates(user=Depends(api.identity)):
         return {'templates':CASES}
+
+    @api.router.post('/heritage/templates/{case_id}')
+    @api.serialized
+    def create_from_template(case_id: str, request: Request, user=Depends(api.identity)):
+        case = next((case for case in CASES if case['id'] == case_id), None)
+        if case is None:
+            raise HTTPException(404, '案例模板不存在')
+        if user.get('trial_mode', True) and api.store.ended(user['id']):
+            raise HTTPException(403, '试用已结束')
+        if case_id == 'baoguo':
+            configured_id = os.environ.get('SFA_INK_HERITAGE_BAOGUO_PROJECT_ID', '').strip()
+            source_id = configured_id or (LOCAL_BAOGUO_PROJECT_ID if api.local(request) else '')
+            if source_id:
+                try:
+                    source = api.store.load(source_id) if configured_id else api.access(source_id, user)
+                except UserError:
+                    raise HTTPException(503, '完整保国寺案例暂不可用，请稍后重试') from None
+                except HTTPException as exc:
+                    if exc.status_code != 404:
+                        raise
+                    source = None
+                if source is not None:
+                    shots = source.get('shots', [])
+                    station = source.get('heritage_station') or {}
+                    files = [source.get('final'), source.get('task_card'), (station.get('panorama') or {}).get('image')]
+                    files += [shot.get(key) for shot in shots for key in ('image', 'rendered')]
+                    if station.get('detail'):
+                        files.append(station['detail'].get('image'))
+                    try:
+                        complete = source.get('project_type') == 'heritage' and bool(shots) and all(
+                            name and api.store.asset(source_id, name).is_file() for name in files
+                        )
+                    except (OSError, UserError):
+                        complete = False
+                    if not complete:
+                        raise HTTPException(503, '完整保国寺案例的资料不齐，请联系负责人')
+                    try:
+                        return api.public(api.store.clone(source_id, user['id']))
+                    except UserError as exc:
+                        raise HTTPException(409, str(exc)) from exc
+                    except OSError:
+                        raise HTTPException(503, '暂时无法复制保国寺案例，请稍后重试') from None
+        station = Station.model_validate(case['station']).model_dump()
+        p = api.store.create(user['id'], case['title'], '研学故事待老师编辑与确认。')
+        p.update(project_type='heritage', heritage_station=station, heritage_version=1)
+        api.store.save(p)
+        return api.public(p)
 
     @api.router.put('/projects/{pid}/heritage/guide')
     @api.serialized

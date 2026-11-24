@@ -186,7 +186,10 @@ def identity(request: Request):
     for entry in invites():
         expected = str(entry.get('token', ''))
         if expected and secrets.compare_digest(token, expected):
-            return {'id': str(entry['user']), 'limits': entry.get('limits', ZERO), 'local': False, 'trial_mode': True}
+            direct_generation = (os.environ.get('SFA_INK_PUBLIC') == '1'
+                                 and os.environ.get('SFA_INK_INVITE_REAL_GENERATION') == '1')
+            return {'id': str(entry['user']), 'limits': entry.get('limits', ZERO), 'local': False,
+                    'trial_mode': True, 'direct_generation': direct_generation}
     if token == 'local' and local(request) and not invites():
         return {'id': 'local', 'limits': json.loads(os.environ.get('SFA_INK_LOCAL_LIMITS', json.dumps(ZERO))), 'local': True, 'trial_mode': True}
     raise HTTPException(401, '请输入负责人提供的试用邀请码')
@@ -334,8 +337,10 @@ def public(p):
 
 
 def call(user, kind, pid, fn):
-    cid = (store.reserve(user['id'], kind, pid, user['limits'])
-           if user.get('trial_mode', True) else store.record_call(user['id'], kind, pid))
+    if user.get('trial_mode', True) and not user.get('direct_generation'):
+        cid = store.reserve(user['id'], kind, pid, user['limits'])
+    else:
+        cid = store.record_call(user['id'], kind, pid)
     try:
         result = fn()
     except Exception:
